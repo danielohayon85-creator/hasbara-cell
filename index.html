@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>תא הסברה נפת הרטוב</title>
+  <link rel="icon" type="image/png" href="static/logo.png">
+  <link rel="stylesheet" href="static/styles.css">
+</head>
+<body>
+  <!-- מסך התחברות -->
+  <div id="loginView" class="login-wrap">
+    <form class="login-card" id="loginForm">
+      <img src="static/logo.png" alt="" class="login-logo" onerror="this.style.display='none'">
+      <h1>תא הסברה נפת הרטוב</h1>
+      <p class="sub">מערכת ניהול הסברה · שגרה, תרגיל וחירום</p>
+      <input id="username" placeholder="שם משתמש" autocomplete="username" required>
+      <input id="password" type="password" placeholder="סיסמה" autocomplete="current-password" required>
+      <button type="submit">כניסה</button>
+      <div id="loginError" class="err"></div>
+    </form>
+  </div>
+
+  <!-- אפליקציה -->
+  <div id="appView" class="hidden">
+    <header class="topbar">
+      <div class="brand"><img src="static/logo.png" alt="" class="brand-logo" onerror="this.style.display='none'">תא הסברה נפת הרטוב</div>
+      <div class="user-box">
+        <span id="userName"></span>
+        <button id="pwBtn" class="link">שינוי סיסמה</button>
+        <button id="logoutBtn" class="link">יציאה</button>
+      </div>
+    </header>
+    <nav class="tabs" id="tabs"></nav>
+    <main id="content"></main>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="static/app.js"></script>
+</body>
+</html>

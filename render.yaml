@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: hasbara-cell
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --workers 1 --threads 4 --timeout 120
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_PASSWORD       # סיסמת admin ראשונית — מוצגת ב-Environment בדשבורד
+        generateValue: true
+      - key: DATA_DIR              # דיסק מתמיד — DB וקבצים נשמרים בין deploys
+        value: /var/data
+      - key: WHATSAPP_WEBHOOK_TOKEN   # טוקן ל-webhook של וואטסאפ (Twilio)
+        generateValue: true
+      - key: ANTHROPIC_API_KEY     # מוזן ידנית ב-Dashboard; ריק = מצב ידני בלי AI
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
