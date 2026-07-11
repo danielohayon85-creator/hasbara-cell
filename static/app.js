@@ -387,7 +387,10 @@ async function openQuestion(qid) {
       <textarea id="qProposed" ${canWrite() ? '' : 'readonly'}>${esc(q.proposed_answer || '')}</textarea></div>
     ${q.approved_answer ? `<div class="field"><label>✅ מענה מאושר (${esc(q.approved_by_name || '')}, ${fmtDT(q.answered_at)})</label>
       <div class="summary-box" style="max-height:150px">${esc(q.approved_answer)}</div>
-      <button class="btn sm ghost" id="copyAnswer" style="align-self:flex-start;margin-top:4px">📋 העתק מענה לשליחה</button></div>` : ''}
+      <div class="btn-row" style="margin-top:4px">
+        <button class="btn sm ghost" id="copyAnswer">📋 העתק מענה לשליחה</button>
+        ${canWrite() && q.asker_phone && META.wa_send_enabled ? `<button class="btn sm" style="background:#25D366" id="sendWA">📱 השב בוואטסאפ לפונה</button>` : ''}
+      </div></div>` : ''}
     ${canWrite() ? `
     <div class="btn-row">
       <button class="btn" id="qUpdate">💾 שמור שינויים</button>
@@ -413,6 +416,18 @@ async function openQuestion(qid) {
 
   const copyBtn = m.querySelector('#copyAnswer');
   if (copyBtn) copyBtn.addEventListener('click', () => copyText(q.approved_answer));
+
+  const sendWABtn = m.querySelector('#sendWA');
+  if (sendWABtn) sendWABtn.addEventListener('click', async () => {
+    if (!confirm(`לשלוח את המענה בוואטסאפ אל ${q.asker_name || ''} (${q.asker_phone})?`)) return;
+    sendWABtn.disabled = true;
+    try {
+      await api(`/api/questions/${qid}/send-answer`, { method: 'POST' });
+      toast('📱 המענה נשלח לפונה בוואטסאפ');
+      closeModal();
+      if (currentTab === 'questions') loadQuestions();
+    } catch (e) { toast(e.message, true); sendWABtn.disabled = false; }
+  });
 
   if (!canWrite()) return;
 
@@ -1351,7 +1366,17 @@ async function loadSysStatus() {
         <div class="row"><input id="apiKeyInput" type="password" placeholder="sk-ant-..." style="flex:2">
         <button class="btn sm" id="apiKeySave">שמור מפתח</button></div>
         <span class="muted">ניתן ליצור מפתח ב-console.anthropic.com. המפתח מפעיל: תובנות ממסמכים, ניסוח הודעות וסיכום נרטיבי.</span></div>
-      <div class="hist-item">📱 Webhook וואטסאפ: ${s.webhook_configured ? '<b style="color:var(--ok)">מוגדר</b>' : '<b style="color:var(--err)">לא מוגדר</b> — הגדר WHATSAPP_WEBHOOK_TOKEN'}</div>
+      <div class="hist-item">📱 שליחת וואטסאפ (מענה חוזר לפונה): ${s.wa_send_enabled
+        ? `<b style="color:var(--ok)">מחובר</b> · Instance: <code style="font-size:12px">${esc(s.greenapi_instance || '')}</code>`
+        : '<b style="color:var(--err)">לא מחובר</b>'}</div>
+      <div class="field" style="margin-top:6px"><label>חיבור Green API (מהלוח ב-green-api.com)</label>
+        <div class="row">
+          <input id="gaInstance" placeholder="idInstance" style="flex:1">
+          <input id="gaToken" type="password" placeholder="apiTokenInstance" style="flex:2">
+          <button class="btn sm" id="gaSave">שמור חיבור</button>
+        </div>
+        <span class="muted">מאפשר לשלוח מענה מאושר חזרה לפונה בלחיצה. השאר ריק ושמור — לניתוק.</span></div>
+      <div class="hist-item">📥 Webhook קליטת וואטסאפ: ${s.webhook_configured ? '<b style="color:var(--ok)">מוגדר</b>' : '<b style="color:var(--err)">לא מוגדר</b> — הגדר WHATSAPP_WEBHOOK_TOKEN'}</div>
       ${s.webhook_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Twilio (מספר ייעודי רשמי):</span><br><code style="font-size:12px">${esc(s.webhook_url)}</code>
         <button class="btn sm ghost" id="whCopy">📋</button></div>` : ''}
       ${s.greenapi_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Green API (בוט בקבוצה + מספר ייעודי):</span><br><code style="font-size:12px">${esc(s.greenapi_url)}</code>
@@ -1363,6 +1388,17 @@ async function loadSysStatus() {
     if (wc) wc.addEventListener('click', () => copyText(s.webhook_url));
     const gc = $('#gaCopy');
     if (gc) gc.addEventListener('click', () => copyText(s.greenapi_url));
+    $('#gaSave').addEventListener('click', async () => {
+      const instance_id = $('#gaInstance').value.trim();
+      const token = $('#gaToken').value.trim();
+      if ((!instance_id || !token) && !confirm('לא הוזנו פרטים מלאים — לנתק את חיבור השליחה?')) return;
+      try {
+        const r = await api('/api/settings/greenapi', { method: 'POST', body: { instance_id, token } });
+        toast(r.wa_send_enabled ? '📱 חיבור הוואטסאפ נשמר — שליחת מענה חוזר פעילה' : 'החיבור נותק');
+        META = await api('/api/meta');
+        loadSysStatus();
+      } catch (e) { toast(e.message, true); }
+    });
     $('#apiKeySave').addEventListener('click', async () => {
       const key = $('#apiKeyInput').value.trim();
       if (!key && !confirm('לא הוזן מפתח — למחוק את המפתח השמור?')) return;

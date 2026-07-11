@@ -479,6 +479,7 @@ def meta():
         'out_statuses': OUT_STATUSES,
         'canned_categories': CANNED_CATEGORIES, 'material_categories': MATERIAL_CATEGORIES,
         'ai_enabled': ai_enabled(),
+        'wa_send_enabled': wa_send_enabled(),
     })
 
 
@@ -903,6 +904,72 @@ def whatsapp_webhook():
 def _twiml():
     return Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
                     mimetype='application/xml')
+
+
+# ---- שליחת וואטסאפ יוצא דרך Green API (מענה חוזר לפונה) ----
+def _greenapi_creds():
+    conn = get_db()
+    iid = get_setting(conn, 'greenapi_instance_id')
+    tok = get_setting(conn, 'greenapi_token')
+    conn.close()
+    return iid, tok
+
+
+def wa_send_enabled():
+    iid, tok = _greenapi_creds()
+    return bool(iid and tok)
+
+
+def send_whatsapp(phone, text):
+    """שולח הודעת וואטסאפ למספר דרך Green API. זורק חריגה בכישלון."""
+    iid, tok = _greenapi_creds()
+    if not (iid and tok):
+        raise RuntimeError('חיבור וואטסאפ לשליחה לא מוגדר (מסך הגדרות)')
+    p = re.sub(r'\D', '', phone or '')
+    if p.startswith('0'):
+        p = '972' + p[1:]
+    if not p:
+        raise RuntimeError('לפונה אין מספר טלפון')
+    import urllib.request
+    import urllib.error
+    req = urllib.request.Request(
+        f'https://api.green-api.com/waInstance{iid}/sendMessage/{tok}',
+        data=json.dumps({'chatId': p + '@c.us', 'message': text}).encode('utf-8'),
+        headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f'שירות הוואטסאפ דחה את הבקשה ({e.code}) — בדוק את פרטי החיבור בהגדרות')
+    except urllib.error.URLError:
+        raise RuntimeError('אין חיבור לשירות הוואטסאפ — נסה שוב')
+
+
+@app.route('/api/questions/<int:qid>/send-answer', methods=['POST'])
+def send_answer_whatsapp(qid):
+    """שולח את המענה חזרה לפונה בוואטסאפ, מאותו מספר ייעודי."""
+    conn = get_db()
+    q = conn.execute('SELECT * FROM questions WHERE id=?', (qid,)).fetchone()
+    conn.close()
+    if not q:
+        return jsonify({'error': 'שאלה לא נמצאה'}), 404
+    if not q['asker_phone']:
+        return jsonify({'error': 'לשאלה אין מספר טלפון של פונה'}), 400
+    answer = q['approved_answer'] or (q['proposed_answer'] if not q['needs_approval'] else None)
+    if not answer:
+        return jsonify({'error': 'אין מענה מאושר לשליחה' if q['needs_approval'] else 'אין מענה לשליחה'}), 400
+    try:
+        send_whatsapp(q['asker_phone'], answer)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 502
+    conn = get_db()
+    conn.execute('UPDATE questions SET status=?, answered_at=COALESCE(answered_at, ?), updated_at=? WHERE id=?',
+                 ('נענה', now(), now(), qid))
+    log_history(conn, qid, 'answer_sent', f'המענה נשלח בוואטסאפ אל {q["asker_phone"]}')
+    log_action(conn, 'send_answer_whatsapp', 'question', qid)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
 
 
 # ---- Green API: בוט בקבוצה / מספר ייעודי (חיבור וואטסאפ דרך greenapi.com) ----
@@ -2098,8 +2165,30 @@ def settings_status():
         if WEBHOOK_TOKEN else None,
         'greenapi_url': (request.url_root.rstrip('/') + '/api/webhook/greenapi?token=' + WEBHOOK_TOKEN)
         if WEBHOOK_TOKEN else None,
+        'wa_send_enabled': wa_send_enabled(),
+        'greenapi_instance': _greenapi_creds()[0],
         'is_prod': IS_PROD,
     })
+
+
+@app.route('/api/settings/greenapi', methods=['POST'])
+@roles_required('admin')
+def set_greenapi():
+    """הגדרת חיבור Green API לשליחת וואטסאפ. ריק = ניתוק."""
+    d = request.get_json(force=True)
+    iid = (d.get('instance_id') or '').strip()
+    tok = (d.get('token') or '').strip()
+    conn = get_db()
+    if iid and tok:
+        set_setting(conn, 'greenapi_instance_id', iid)
+        set_setting(conn, 'greenapi_token', tok)
+        log_action(conn, 'set_greenapi', 'settings', None, 'חיבור וואטסאפ עודכן')
+    else:
+        conn.execute("DELETE FROM settings WHERE key IN ('greenapi_instance_id','greenapi_token')")
+        log_action(conn, 'clear_greenapi', 'settings', None)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'wa_send_enabled': wa_send_enabled()})
 
 
 @app.route('/api/settings/api-key', methods=['POST'])
