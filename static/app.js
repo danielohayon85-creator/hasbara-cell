@@ -1352,13 +1352,17 @@ async function loadSysStatus() {
         <button class="btn sm" id="apiKeySave">שמור מפתח</button></div>
         <span class="muted">ניתן ליצור מפתח ב-console.anthropic.com. המפתח מפעיל: תובנות ממסמכים, ניסוח הודעות וסיכום נרטיבי.</span></div>
       <div class="hist-item">📱 Webhook וואטסאפ: ${s.webhook_configured ? '<b style="color:var(--ok)">מוגדר</b>' : '<b style="color:var(--err)">לא מוגדר</b> — הגדר WHATSAPP_WEBHOOK_TOKEN'}</div>
-      ${s.webhook_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Twilio:</span><br><code style="font-size:12px">${esc(s.webhook_url)}</code>
+      ${s.webhook_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Twilio (מספר ייעודי רשמי):</span><br><code style="font-size:12px">${esc(s.webhook_url)}</code>
         <button class="btn sm ghost" id="whCopy">📋</button></div>` : ''}
+      ${s.greenapi_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Green API (בוט בקבוצה + מספר ייעודי):</span><br><code style="font-size:12px">${esc(s.greenapi_url)}</code>
+        <button class="btn sm ghost" id="gaCopy">📋</button></div>` : ''}
       <div class="hist-item">🌐 סביבה: ${s.is_prod ? 'פרודקשן (Render)' : 'פיתוח מקומי'}</div>
       <div class="hist-item">📦 גיבוי: <a class="btn sm" href="/api/backup">הורד גיבוי מלא (ZIP)</a>
         <span class="muted">כולל את כל הנתונים והקבצים. מומלץ אחת לשבוע — שמור בדרייב/מחשב.</span></div>`;
     const wc = $('#whCopy');
     if (wc) wc.addEventListener('click', () => copyText(s.webhook_url));
+    const gc = $('#gaCopy');
+    if (gc) gc.addEventListener('click', () => copyText(s.greenapi_url));
     $('#apiKeySave').addEventListener('click', async () => {
       const key = $('#apiKeyInput').value.trim();
       if (!key && !confirm('לא הוזן מפתח — למחוק את המפתח השמור?')) return;

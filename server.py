@@ -378,7 +378,7 @@ def roles_required(*roles):
     return deco
 
 
-PUBLIC_PATHS = ('/api/login', '/api/webhook/whatsapp')
+PUBLIC_PATHS = ('/api/login', '/api/webhook/whatsapp', '/api/webhook/greenapi')
 
 
 @app.before_request
@@ -903,6 +903,93 @@ def whatsapp_webhook():
 def _twiml():
     return Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
                     mimetype='application/xml')
+
+
+# ---- Green API: בוט בקבוצה / מספר ייעודי (חיבור וואטסאפ דרך greenapi.com) ----
+RELEVANCE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'relevant': {'type': 'boolean',
+                     'description': 'האם ההודעה היא שאלה/פנייה שרלוונטית לתא ההסברה'},
+        'topic': {'type': 'string', 'description': 'נושא מתאים מהרשימה, או מחרוזת ריקה'},
+    },
+    'required': ['relevant', 'topic'],
+    'additionalProperties': False,
+}
+
+
+def _relevance_system():
+    return (
+        f'אתה מסנן הודעות עבור תא ההסברה של {DISTRICT_NAME} בפיקוד העורף. '
+        'קבל הודעה מקבוצת וואטסאפ והחלט אם היא שאלה או פנייה שהתא צריך לטפל בה: '
+        'שאלות על הנחיות התגוננות, לימודים, מקלטים, התקהלות, שירותים חיוניים, '
+        'מידע לציבור, בקשות להבהרה או דיווח על פערי מידע. '
+        'לא רלוונטי: שיחת חולין, ברכות, אישורי קבלה ("תודה", "קיבלתי", "👍"), '
+        'תיאומים פנימיים והודעות מערכת. '
+        f'אם רלוונטי — בחר נושא מהרשימה: {", ".join(SEED_TOPICS)}. '
+        'החזר JSON בלבד.'
+    )
+
+
+def _classify_group_message(text):
+    """מחזיר (relevant, topic). עם AI — סיווג חכם; בלעדיו — יוריסטיקה של סימן שאלה."""
+    if ai_enabled():
+        try:
+            raw = call_claude(_relevance_system(), text[:2000], max_tokens=200,
+                              schema=RELEVANCE_SCHEMA)
+            data = json.loads(raw)
+            return bool(data.get('relevant')), (data.get('topic') or None)
+        except Exception:
+            pass  # נפילה ליוריסטיקה — עדיף לקלוט מדי מאשר לפספס
+    return ('?' in text or 'האם' in text or 'מתי' in text or 'איפה' in text), None
+
+
+@app.route('/api/webhook/greenapi', methods=['POST'])
+def greenapi_webhook():
+    """Webhook ל-Green API: קולט הודעות ממספר ייעודי וגם מקבוצות שהבוט חבר בהן.
+    הודעה פרטית — נקלטת תמיד; הודעת קבוצה — רק אם סווגה כרלוונטית לתא."""
+    token = request.args.get('token', '')
+    if not WEBHOOK_TOKEN or not hmac.compare_digest(token, WEBHOOK_TOKEN):
+        return jsonify({'error': 'forbidden'}), 403
+    d = request.get_json(silent=True) or {}
+    if d.get('typeWebhook') != 'incomingMessageReceived':
+        return jsonify({'ok': True})
+    md = d.get('messageData') or {}
+    text = ((md.get('textMessageData') or {}).get('textMessage')
+            or (md.get('extendedTextMessageData') or {}).get('text') or '').strip()
+    if not text:
+        return jsonify({'ok': True})
+    sd = d.get('senderData') or {}
+    chat_id = sd.get('chatId') or ''
+    is_group = chat_id.endswith('@g.us')
+    phone = normalize_phone((sd.get('sender') or '').split('@')[0])
+    sender_name = sd.get('senderName') or phone
+    chat_name = sd.get('chatName') or ''
+    topic = None
+    if is_group:
+        relevant, topic = _classify_group_message(text)
+        if not relevant:
+            return jsonify({'ok': True, 'skipped': 'not relevant'})
+    conn = get_db()
+    recent = (now_dt() - timedelta(minutes=2)).isoformat(timespec='seconds')
+    dup = conn.execute('SELECT id FROM questions WHERE asker_phone=? AND content=? AND opened_at>=?',
+                       (phone, text, recent)).fetchone()
+    if dup:
+        conn.close()
+        return jsonify({'ok': True, 'skipped': 'duplicate'})
+    notes = f'נקלט מקבוצת וואטסאפ: {chat_name}' if is_group else None
+    cur = conn.execute(
+        'INSERT INTO questions (opened_at, asker_name, asker_phone, source, content, topic, '
+        'urgency, status, internal_notes, raw_source_text, updated_at) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        (now(), sender_name, phone, 'וואטסאפ', text, topic, 'רגיל', 'חדש', notes,
+         json.dumps(d, ensure_ascii=False)[:4000], now()))
+    log_history(conn, cur.lastrowid, 'created',
+                'התקבלה הודעת וואטסאפ' + (f' (קבוצה: {chat_name})' if is_group else ''),
+                user_id=None)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'question_id': cur.lastrowid})
 
 
 # ---------------------------------------------------------------- מסמכים
@@ -2008,6 +2095,8 @@ def settings_status():
         'model': get_model(),
         'webhook_configured': bool(WEBHOOK_TOKEN),
         'webhook_url': (request.url_root.rstrip('/') + '/api/webhook/whatsapp?token=' + WEBHOOK_TOKEN)
+        if WEBHOOK_TOKEN else None,
+        'greenapi_url': (request.url_root.rstrip('/') + '/api/webhook/greenapi?token=' + WEBHOOK_TOKEN)
         if WEBHOOK_TOKEN else None,
         'is_prod': IS_PROD,
     })
