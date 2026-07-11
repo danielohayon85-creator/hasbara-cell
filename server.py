@@ -11,6 +11,7 @@ import sqlite3
 import string
 import uuid
 import hmac
+import zipfile
 from datetime import datetime, timedelta
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -2040,6 +2041,35 @@ def set_model():
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
+
+
+@app.route('/api/backup')
+@roles_required('admin')
+def backup():
+    """גיבוי מלא: DB + כל הקבצים שהועלו, כקובץ ZIP להורדה."""
+    # העתקה בטוחה של ה-DB (גם תוך כדי כתיבה) דרך sqlite backup API
+    tmp_db = os.path.join(DATA_ROOT, '.backup_db_tmp.sqlite')
+    src = sqlite3.connect(DB_PATH)
+    dst = sqlite3.connect(tmp_db)
+    with dst:
+        src.backup(dst)
+    dst.close()
+    src.close()
+    zip_path = os.path.join(DATA_ROOT, '.backup_latest.zip')
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.write(tmp_db, 'hasbara.db')
+        for name in os.listdir(UPLOAD_DIR):
+            fp = os.path.join(UPLOAD_DIR, name)
+            if os.path.isfile(fp):
+                z.write(fp, 'uploads/' + name)
+    os.remove(tmp_db)
+    conn = get_db()
+    log_action(conn, 'backup_download', 'system', None,
+               f'{os.path.getsize(zip_path) // 1024}KB')
+    conn.commit()
+    conn.close()
+    return send_file(zip_path, download_name=f'gibui-hasbara-{today()}.zip',
+                     as_attachment=True)
 
 
 @app.route('/api/audit')

@@ -1354,7 +1354,9 @@ async function loadSysStatus() {
       <div class="hist-item">📱 Webhook וואטסאפ: ${s.webhook_configured ? '<b style="color:var(--ok)">מוגדר</b>' : '<b style="color:var(--err)">לא מוגדר</b> — הגדר WHATSAPP_WEBHOOK_TOKEN'}</div>
       ${s.webhook_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Twilio:</span><br><code style="font-size:12px">${esc(s.webhook_url)}</code>
         <button class="btn sm ghost" id="whCopy">📋</button></div>` : ''}
-      <div class="hist-item">🌐 סביבה: ${s.is_prod ? 'פרודקשן (Render)' : 'פיתוח מקומי'}</div>`;
+      <div class="hist-item">🌐 סביבה: ${s.is_prod ? 'פרודקשן (Render)' : 'פיתוח מקומי'}</div>
+      <div class="hist-item">📦 גיבוי: <a class="btn sm" href="/api/backup">הורד גיבוי מלא (ZIP)</a>
+        <span class="muted">כולל את כל הנתונים והקבצים. מומלץ אחת לשבוע — שמור בדרייב/מחשב.</span></div>`;
     const wc = $('#whCopy');
     if (wc) wc.addEventListener('click', () => copyText(s.webhook_url));
     $('#apiKeySave').addEventListener('click', async () => {
