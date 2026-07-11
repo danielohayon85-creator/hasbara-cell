@@ -13,6 +13,7 @@ import uuid
 import hmac
 from datetime import datetime, timedelta
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 from flask import Flask, request, session, jsonify, send_from_directory, send_file, Response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -55,6 +56,10 @@ ACTIVITY_TYPES = ['הודעה שהופצה', 'מענה לשאלה', 'עדכון 
 ACTIVITY_STATUSES = ['בוצע', 'בטיפול', 'ממתין לאישור', 'הופץ', 'דורש המשך טיפול']
 OUT_STATUSES = ['טיוטה', 'מאושר', 'הופץ']
 DISTRICT_NAME = os.environ.get('DISTRICT_NAME', 'נפת הרטוב')
+CANNED_CATEGORIES = ['ירי רקטות וטילים', 'רעידת אדמה', 'חומרים מסוכנים', 'אירוע ביטחוני',
+                     'מזג אוויר קיצון', 'הרגעה ועדכון כללי', 'אחר']
+MATERIAL_CATEGORIES = ['פלייר', 'אינפוגרפיקה', 'תמונה', 'סרטון', 'מצגת', 'מסמך', 'אחר']
+MATERIAL_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.mp4', '.pptx', '.docx', '.xlsx')
 ROLES = ['admin', 'lead', 'user', 'viewer']
 ROLE_NAMES = {'admin': 'מנהל מערכת', 'lead': 'אחראי תא הסברה', 'user': 'משתמש', 'viewer': 'צפייה בלבד'}
 
@@ -66,12 +71,20 @@ SEED_TOPICS = ['מדיניות התגוננות', 'לימודים', 'התקהל�
 # נוצרים ממסך ההגדרות.
 
 
+# שעון ישראל — שרתי Render רצים ב-UTC; כל חותמות הזמן במערכת בשעון ישראל
+IL_TZ = ZoneInfo('Asia/Jerusalem')
+
+
+def now_dt():
+    return datetime.now(IL_TZ).replace(tzinfo=None)
+
+
 def now():
-    return datetime.now().isoformat(timespec='seconds')
+    return now_dt().isoformat(timespec='seconds')
 
 
 def today():
-    return datetime.now().date().isoformat()
+    return now_dt().date().isoformat()
 
 
 # ---------------------------------------------------------------- DB
@@ -238,6 +251,30 @@ def init_db():
             active INTEGER NOT NULL DEFAULT 1,
             sort_order INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS canned_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            category TEXT,
+            body TEXT NOT NULL,
+            audience TEXT,
+            notes TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_by_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS materials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            category TEXT,
+            description TEXT,
+            orig_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            mime TEXT,
+            size INTEGER,
+            uploaded_by_id INTEGER,
+            created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -276,6 +313,25 @@ def init_db():
     if c.execute('SELECT COUNT(*) FROM topics').fetchone()[0] == 0:
         for i, t in enumerate(SEED_TOPICS):
             c.execute('INSERT INTO topics (name, active, sort_order) VALUES (?,1,?)', (t, i))
+    # תבניות הודעה ראשוניות לבנק — ניתנות לעריכה/מחיקה מהמסך
+    if c.execute('SELECT COUNT(*) FROM canned_messages').fetchone()[0] == 0:
+        seeds = [
+            ('הודעה ראשונית — ירי רקטות', 'ירי רקטות וטילים', 'ציבור',
+             'בעקבות ירי לעבר [אזור]: יש לפעול לפי הנחיות פיקוד העורף. בהישמע אזעקה — היכנסו '
+             'למרחב המוגן ושהו בו [10] דקות. עקבו אחר עדכונים בערוצים הרשמיים בלבד.'),
+            ('הודעה ראשונית — רעידת אדמה', 'רעידת אדמה', 'ציבור',
+             'בעקבות רעידת האדמה שהורגשה ב-[שעה]: אם אתם בתוך מבנה — צאו לשטח פתוח. '
+             'התרחקו ממבנים, עצים ועמודי חשמל. אין להשתמש במעליות. המוקד העירוני: [מספר].'),
+            ('הודעה ראשונית — אירוע חומרים מסוכנים', 'חומרים מסוכנים', 'ציבור',
+             'בעקבות אירוע חומרים מסוכנים ב-[מיקום]: תושבי [אזור] מתבקשים להיכנס למבנה, '
+             'לסגור חלונות ולכבות מזגנים עד להודעה חדשה. אין להתקרב לאזור האירוע.'),
+            ('עדכון הרגעה כללי', 'הרגעה ועדכון כללי', 'ציבור',
+             'עדכון לתושבי [אזור]: האירוע ב-[מיקום] בטיפול הכוחות. אין הנחיות מיוחדות לציבור '
+             'בשלב זה. נעדכן בכל שינוי בערוצים הרשמיים.'),
+        ]
+        for title, cat, aud, body in seeds:
+            c.execute('INSERT INTO canned_messages (title, category, body, audience, active, created_at) '
+                      'VALUES (?,?,?,?,1,?)', (title, cat, body, aud, now()))
     conn.commit()
     conn.close()
 
@@ -420,6 +476,7 @@ def meta():
         'doc_types': DOC_TYPES, 'msg_statuses': MSG_STATUSES, 'audiences': AUDIENCES,
         'activity_types': ACTIVITY_TYPES, 'activity_statuses': ACTIVITY_STATUSES,
         'out_statuses': OUT_STATUSES,
+        'canned_categories': CANNED_CATEGORIES, 'material_categories': MATERIAL_CATEGORIES,
         'ai_enabled': ai_enabled(),
     })
 
@@ -818,7 +875,7 @@ def whatsapp_webhook():
         return _twiml()
     conn = get_db()
     # מניעת כפילות: אותה הודעה מאותו מספר ב-2 הדקות האחרונות
-    recent = (datetime.now() - timedelta(minutes=2)).isoformat(timespec='seconds')
+    recent = (now_dt() - timedelta(minutes=2)).isoformat(timespec='seconds')
     dup = conn.execute('SELECT id FROM questions WHERE asker_phone=? AND content=? AND opened_at>=?',
                        (phone, body, recent)).fetchone()
     if dup:
@@ -1355,6 +1412,164 @@ def distribute_outgoing(oid):
     return jsonify({'ok': True, 'activity_id': cur.lastrowid})
 
 
+# ---------------------------------------------------------------- בנק הודעות מוכנות
+@app.route('/api/canned')
+def list_canned():
+    conn = get_db()
+    where, params = ['active=1'], []
+    if request.args.get('category'):
+        where.append('category=?')
+        params.append(request.args['category'])
+    rows = []
+    for r in conn.execute('SELECT * FROM canned_messages WHERE ' + ' AND '.join(where) +
+                          ' ORDER BY category, title LIMIT 300', params):
+        d = dict(r)
+        d['created_by_name'] = user_name(conn, r['created_by_id'])
+        rows.append(d)
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route('/api/canned', methods=['POST'])
+def create_canned():
+    d = request.get_json(force=True)
+    if not (d.get('title') or '').strip() or not (d.get('body') or '').strip():
+        return jsonify({'error': 'כותרת ונוסח חובה'}), 400
+    conn = get_db()
+    cur = conn.execute(
+        'INSERT INTO canned_messages (title, category, body, audience, notes, active, '
+        'created_by_id, created_at, updated_at) VALUES (?,?,?,?,?,1,?,?,?)',
+        (d['title'].strip(), d.get('category'), d['body'].strip(), d.get('audience'),
+         d.get('notes'), session['uid'], now(), now()))
+    log_action(conn, 'create_canned', 'canned', cur.lastrowid)
+    conn.commit()
+    conn.close()
+    return jsonify({'id': cur.lastrowid})
+
+
+@app.route('/api/canned/<int:cid>', methods=['PUT'])
+def update_canned(cid):
+    d = request.get_json(force=True)
+    sets, params = [], []
+    for f in ('title', 'category', 'body', 'audience', 'notes'):
+        if f in d:
+            sets.append(f'{f}=?')
+            params.append(d[f])
+    if sets:
+        sets.append('updated_at=?')
+        params.append(now())
+        params.append(cid)
+        conn = get_db()
+        conn.execute(f'UPDATE canned_messages SET {", ".join(sets)} WHERE id=?', params)
+        log_action(conn, 'update_canned', 'canned', cid)
+        conn.commit()
+        conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/canned/<int:cid>', methods=['DELETE'])
+@roles_required('admin', 'lead')
+def delete_canned(cid):
+    conn = get_db()
+    conn.execute('UPDATE canned_messages SET active=0 WHERE id=?', (cid,))
+    log_action(conn, 'delete_canned', 'canned', cid)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+# ---------------------------------------------------------------- גלריית חומרי הסברה
+@app.route('/api/materials')
+def list_materials():
+    conn = get_db()
+    where, params = [], []
+    if request.args.get('category'):
+        where.append('category=?')
+        params.append(request.args['category'])
+    sql = 'SELECT * FROM materials'
+    if where:
+        sql += ' WHERE ' + ' AND '.join(where)
+    sql += ' ORDER BY created_at DESC LIMIT 300'
+    rows = []
+    for r in conn.execute(sql, params):
+        d = dict(r)
+        d['uploaded_by_name'] = user_name(conn, r['uploaded_by_id'])
+        d['is_image'] = (r['mime'] or '').startswith('image/')
+        rows.append(d)
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route('/api/materials', methods=['POST'])
+def upload_material():
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'error': 'לא נבחר קובץ'}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in MATERIAL_EXTS:
+        return jsonify({'error': 'סוג קובץ לא נתמך. מותר: תמונות, PDF, וידאו (mp4), מצגות ומסמכים'}), 400
+    stored = uuid.uuid4().hex + ext
+    path = os.path.join(UPLOAD_DIR, stored)
+    f.save(path)
+    conn = get_db()
+    cur = conn.execute(
+        'INSERT INTO materials (title, category, description, orig_name, stored_name, mime, '
+        'size, uploaded_by_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        ((request.form.get('title') or f.filename).strip(), request.form.get('category'),
+         request.form.get('description'), f.filename, stored, f.mimetype,
+         os.path.getsize(path), session['uid'], now()))
+    log_action(conn, 'upload_material', 'material', cur.lastrowid, f.filename)
+    conn.commit()
+    conn.close()
+    return jsonify({'id': cur.lastrowid})
+
+
+@app.route('/api/materials/<int:mid>/file')
+def material_file(mid):
+    conn = get_db()
+    r = conn.execute('SELECT * FROM materials WHERE id=?', (mid,)).fetchone()
+    conn.close()
+    if not r:
+        return jsonify({'error': 'קובץ לא נמצא'}), 404
+    as_attach = request.args.get('dl') == '1'
+    return send_file(os.path.join(UPLOAD_DIR, r['stored_name']),
+                     download_name=r['orig_name'], as_attachment=as_attach)
+
+
+@app.route('/api/materials/<int:mid>', methods=['PUT'])
+def update_material(mid):
+    d = request.get_json(force=True)
+    sets, params = [], []
+    for f in ('title', 'category', 'description'):
+        if f in d:
+            sets.append(f'{f}=?')
+            params.append(d[f])
+    if sets:
+        params.append(mid)
+        conn = get_db()
+        conn.execute(f'UPDATE materials SET {", ".join(sets)} WHERE id=?', params)
+        conn.commit()
+        conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/materials/<int:mid>', methods=['DELETE'])
+@roles_required('admin', 'lead')
+def delete_material(mid):
+    conn = get_db()
+    r = conn.execute('SELECT stored_name FROM materials WHERE id=?', (mid,)).fetchone()
+    if r and r['stored_name']:
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, r['stored_name']))
+        except OSError:
+            pass
+    conn.execute('DELETE FROM materials WHERE id=?', (mid,))
+    log_action(conn, 'delete_material', 'material', mid)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
 # ---------------------------------------------------------------- סיכום משמרת
 def gather_stats(conn, start, end):
     end_full = end if 'T' in end else end + 'T23:59:59'
@@ -1578,7 +1793,8 @@ def search():
     q = request.args.get('q', '').strip()
     if not q:
         return jsonify([])
-    types = (request.args.get('types') or 'questions,documents,messages,activities,summaries').split(',')
+    types = (request.args.get('types') or
+             'questions,documents,messages,activities,summaries,canned,materials').split(',')
     terms = q.split()
 
     def like_clause(fields):
@@ -1622,6 +1838,18 @@ def search():
             results.append({'type': 'summary', 'id': r['id'],
                             'title': f'סיכום משמרת {r["period_start"][:10]} — {r["period_end"][:10]}',
                             'meta': r['created_at'][:16]})
+    if 'canned' in types:
+        w, p = like_clause(['title', 'body'])
+        for r in conn.execute(f'SELECT id, title, category FROM canned_messages WHERE active=1 AND ({w}) '
+                              'ORDER BY title LIMIT 30', p):
+            results.append({'type': 'canned', 'id': r['id'], 'title': r['title'],
+                            'meta': r['category'] or 'הודעה מוכנה'})
+    if 'materials' in types:
+        w, p = like_clause(['title', 'description', 'orig_name'])
+        for r in conn.execute(f'SELECT id, title, category, created_at FROM materials WHERE {w} '
+                              'ORDER BY created_at DESC LIMIT 30', p):
+            results.append({'type': 'material', 'id': r['id'], 'title': r['title'],
+                            'meta': f'{r["category"] or "חומר הסברה"} · {r["created_at"][:10]}'})
     conn.close()
     return jsonify(results)
 

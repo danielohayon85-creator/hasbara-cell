@@ -136,6 +136,8 @@ const TABS = [
   { id: 'questions', label: '❓ מרכז שאלות' },
   { id: 'documents', label: '📄 מסמכים' },
   { id: 'messages', label: '📢 מסרים' },
+  { id: 'canned', label: '🗂 בנק הודעות' },
+  { id: 'gallery', label: '🖼 גלריה' },
   { id: 'activities', label: '📝 פעילות' },
   { id: 'outgoing', label: '📤 הפצה' },
   { id: 'summary', label: '🕐 סיכום משמרת' },
@@ -156,7 +158,8 @@ function switchTab(id) {
     b.classList.toggle('active', b.dataset.tab === id));
   const renderers = {
     dashboard: renderDashboard, questions: renderQuestions, documents: renderDocuments,
-    messages: renderMessages, activities: renderActivities, outgoing: renderOutgoing,
+    messages: renderMessages, canned: renderCanned, gallery: renderGallery,
+    activities: renderActivities, outgoing: renderOutgoing,
     summary: renderSummary, search: renderSearch, settings: renderSettings,
   };
   renderers[id]();
@@ -721,6 +724,178 @@ function messageForm(msg = {}) {
   });
 }
 
+/* ---------------- בנק הודעות מוכנות ---------------- */
+async function renderCanned() {
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">🗂 בנק הודעות מוכנות מראש</h2>
+        ${canWrite() ? '<button class="btn" id="newCanned">+ תבנית חדשה</button>' : ''}
+      </div>
+      <p class="muted">הודעות מנוסחות מראש לתרחישי חירום — ממלאים את ה[סוגריים] ומפיצים. חוסך דקות קריטיות באירוע.</p>
+      <div class="filters">
+        <select id="cnCat"><option value="">כל התרחישים</option>${options(META.canned_categories, '', false)}</select>
+        <button class="btn sm" id="cnApply">סנן</button>
+      </div>
+      <div id="cannedList"><div class="empty">טוען...</div></div>
+    </div>`;
+  if (canWrite()) $('#newCanned').addEventListener('click', () => cannedForm());
+  $('#cnApply').addEventListener('click', loadCanned);
+  loadCanned();
+}
+
+async function loadCanned() {
+  const cat = $('#cnCat') ? $('#cnCat').value : '';
+  const rows = await api('/api/canned' + (cat ? '?category=' + encodeURIComponent(cat) : ''));
+  const el = $('#cannedList');
+  if (!rows.length) { el.innerHTML = '<div class="empty">אין תבניות. צור תבנית ראשונה.</div>'; return; }
+  el.innerHTML = rows.map(cm => `
+    <div class="card" style="margin-bottom:10px">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">${esc(cm.title)} ${cm.category ? chip(cm.category, 'urg-דחוף') : ''}
+          ${cm.audience ? chip(cm.audience, 'urg-רגיל') : ''}</h3>
+      </div>
+      <div style="white-space:pre-wrap;font-size:14px;margin:8px 0">${esc(cm.body)}</div>
+      ${cm.notes ? `<div class="muted">📌 ${esc(cm.notes)}</div>` : ''}
+      <div class="btn-row">
+        <button class="btn sm" data-use="${cm.id}">📤 שלח להפצה</button>
+        <button class="btn sm ghost" data-copy="${cm.id}">📋 העתק</button>
+        ${canWrite() ? `<button class="btn sm ghost" data-edit="${cm.id}">✏️ ערוך</button>` : ''}
+        ${isLead() ? `<button class="btn sm danger" data-del="${cm.id}">מחק</button>` : ''}
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () =>
+    copyText(rows.find(x => x.id === +b.dataset.copy).body)));
+  el.querySelectorAll('[data-use]').forEach(b => b.addEventListener('click', () => {
+    const cm = rows.find(x => x.id === +b.dataset.use);
+    switchTab('outgoing');
+    setTimeout(() => {
+      const bodyEl = $('#oBody'), audEl = $('#oAud');
+      if (bodyEl) bodyEl.value = cm.body;
+      if (audEl && cm.audience) audEl.value = cm.audience;
+      toast('התבנית נטענה — מלא את ה[סוגריים] לפני השמירה');
+    }, 400);
+  }));
+  el.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () =>
+    cannedForm(rows.find(x => x.id === +b.dataset.edit))));
+  el.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('למחוק את התבנית?')) return;
+    try { await api('/api/canned/' + b.dataset.del, { method: 'DELETE' }); toast('נמחק'); loadCanned(); }
+    catch (e) { toast(e.message, true); }
+  }));
+}
+
+function cannedForm(cm = null) {
+  const isEdit = !!cm;
+  const m = modal(`
+    <h2>${isEdit ? 'עריכת תבנית' : 'תבנית הודעה חדשה'}</h2>
+    <div class="field"><label>כותרת התבנית *</label><input id="cnTitle" value="${esc(cm ? cm.title : '')}"></div>
+    <div class="row">
+      <div class="field"><label>תרחיש</label><select id="cnCategory">${options(META.canned_categories, cm ? cm.category : '')}</select></div>
+      <div class="field"><label>קהל יעד</label><select id="cnAud">${options(META.audiences, cm ? cm.audience : '')}</select></div>
+    </div>
+    <div class="field"><label>נוסח ההודעה * (השתמש ב[סוגריים] לפרטים משתנים)</label>
+      <textarea id="cnBody" style="min-height:130px">${esc(cm ? cm.body : '')}</textarea></div>
+    <div class="field"><label>הערות שימוש</label><input id="cnNotes" value="${esc(cm ? cm.notes || '' : '')}"></div>
+    <div class="btn-row"><button class="btn" id="cnSave">שמור</button>
+    <button class="btn ghost" onclick="closeModal()">ביטול</button></div>`, true);
+  m.querySelector('#cnSave').addEventListener('click', async () => {
+    const body = {
+      title: m.querySelector('#cnTitle').value.trim(),
+      category: m.querySelector('#cnCategory').value,
+      audience: m.querySelector('#cnAud').value,
+      body: m.querySelector('#cnBody').value.trim(),
+      notes: m.querySelector('#cnNotes').value.trim(),
+    };
+    if (!body.title || !body.body) { toast('כותרת ונוסח חובה', true); return; }
+    try {
+      if (isEdit) await api('/api/canned/' + cm.id, { method: 'PUT', body });
+      else await api('/api/canned', { method: 'POST', body });
+      closeModal(); toast('נשמר'); loadCanned();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
+/* ---------------- גלריית חומרי הסברה ---------------- */
+async function renderGallery() {
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">🖼 גלריית חומרי הסברה</h2>
+        ${canWrite() ? '<button class="btn" id="upMat">+ העלאת חומר</button>' : ''}
+      </div>
+      <p class="muted">פליירים, אינפוגרפיקות, תמונות, סרטונים ומצגות — מוכנים להורדה והפצה.</p>
+      <div class="filters">
+        <select id="gCat"><option value="">כל הקטגוריות</option>${options(META.material_categories, '', false)}</select>
+        <button class="btn sm" id="gApply">סנן</button>
+      </div>
+      <div id="galleryGrid" class="gallery-grid"><div class="empty">טוען...</div></div>
+    </div>`;
+  if (canWrite()) $('#upMat').addEventListener('click', uploadMaterialModal);
+  $('#gApply').addEventListener('click', loadGallery);
+  loadGallery();
+}
+
+async function loadGallery() {
+  const cat = $('#gCat') ? $('#gCat').value : '';
+  const rows = await api('/api/materials' + (cat ? '?category=' + encodeURIComponent(cat) : ''));
+  const el = $('#galleryGrid');
+  if (!rows.length) { el.innerHTML = '<div class="empty">אין חומרים בגלריה. העלה חומר ראשון.</div>'; return; }
+  const icon = (m) => m.is_image ? '' :
+    (m.mime || '').includes('pdf') ? '📄' : (m.mime || '').includes('video') ? '🎬' :
+    (m.orig_name || '').endsWith('.pptx') ? '📊' : '📁';
+  el.innerHTML = rows.map(mt => `
+    <div class="gallery-card">
+      ${mt.is_image
+        ? `<a href="/api/materials/${mt.id}/file" target="_blank"><img src="/api/materials/${mt.id}/file" alt="${esc(mt.title)}" loading="lazy"></a>`
+        : `<a class="gallery-icon" href="/api/materials/${mt.id}/file?dl=1">${icon(mt)}</a>`}
+      <div class="gallery-info">
+        <b>${esc(mt.title)}</b>
+        ${mt.category ? chip(mt.category, 'urg-רגיל') : ''}
+        ${mt.description ? `<div class="muted">${esc(mt.description)}</div>` : ''}
+        <div class="muted">${esc(mt.uploaded_by_name || '')} · ${fmtD(mt.created_at)} · ${Math.round((mt.size || 0) / 1024)}KB</div>
+        <div class="btn-row" style="margin-top:6px">
+          <a class="btn sm ghost" href="/api/materials/${mt.id}/file?dl=1">⬇️ הורד</a>
+          ${isLead() ? `<button class="btn sm danger" data-del="${mt.id}">מחק</button>` : ''}
+        </div>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('למחוק את החומר לצמיתות?')) return;
+    try { await api('/api/materials/' + b.dataset.del, { method: 'DELETE' }); toast('נמחק'); loadGallery(); }
+    catch (e) { toast(e.message, true); }
+  }));
+}
+
+function uploadMaterialModal() {
+  const m = modal(`
+    <h2>העלאת חומר הסברה</h2>
+    <div class="field"><label>קובץ * (תמונה / PDF / וידאו / מצגת / מסמך, עד 20MB)</label>
+      <input type="file" id="mtFile" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.mp4,.pptx,.docx,.xlsx"></div>
+    <div class="field"><label>שם החומר</label><input id="mtTitle" placeholder="ברירת מחדל: שם הקובץ"></div>
+    <div class="row">
+      <div class="field"><label>קטגוריה</label><select id="mtCat">${options(META.material_categories, '')}</select></div>
+    </div>
+    <div class="field"><label>תיאור</label><input id="mtDesc" placeholder="למה משמש, לאיזה קהל..."></div>
+    <div class="btn-row"><button class="btn" id="mtUp">העלה</button>
+    <button class="btn ghost" onclick="closeModal()">ביטול</button></div>`);
+  m.querySelector('#mtUp').addEventListener('click', async () => {
+    const f = m.querySelector('#mtFile').files[0];
+    if (!f) { toast('בחר קובץ', true); return; }
+    const fd = new FormData();
+    fd.append('file', f);
+    fd.append('title', m.querySelector('#mtTitle').value.trim());
+    fd.append('category', m.querySelector('#mtCat').value);
+    fd.append('description', m.querySelector('#mtDesc').value.trim());
+    try {
+      await api('/api/materials', { method: 'POST', body: fd });
+      closeModal(); toast('החומר הועלה לגלריה'); loadGallery();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 /* ---------------- פעילות ---------------- */
 async function renderActivities() {
   const c = $('#content');
@@ -1018,6 +1193,8 @@ async function renderSearch() {
             <option value="messages">מסרים</option>
             <option value="activities">פעילות</option>
             <option value="summaries">סיכומי משמרת</option>
+            <option value="canned">בנק הודעות</option>
+            <option value="materials">גלריה</option>
           </select></div>
         <button class="btn" id="srchGo">🔍 חפש</button>
       </div>
@@ -1030,7 +1207,7 @@ async function renderSearch() {
     const rows = await api('/api/search?q=' + encodeURIComponent(q) + (t ? '&types=' + t : ''));
     const el = $('#srchResults');
     if (!rows.length) { el.innerHTML = '<div class="empty">לא נמצאו תוצאות</div>'; return; }
-    const typeLabels = { question: 'שאלה', document: 'מסמך', message: 'מסר', activity: 'פעילות', summary: 'סיכום' };
+    const typeLabels = { question: 'שאלה', document: 'מסמך', message: 'מסר', activity: 'פעילות', summary: 'סיכום', canned: 'הודעה מוכנה', material: 'חומר הסברה' };
     el.innerHTML = rows.map((r, i) => `
       <div class="result-item" data-i="${i}">
         <span class="type-tag">${typeLabels[r.type]}</span>${esc(r.title)}
@@ -1043,6 +1220,8 @@ async function renderSearch() {
       else if (r.type === 'message') switchTab('messages');
       else if (r.type === 'activity') switchTab('activities');
       else if (r.type === 'summary') switchTab('summary');
+      else if (r.type === 'canned') switchTab('canned');
+      else if (r.type === 'material') switchTab('gallery');
     }));
   };
   $('#srchGo').addEventListener('click', go);
