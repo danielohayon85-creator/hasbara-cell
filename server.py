@@ -513,13 +513,18 @@ def get_model():
     return m or DEFAULT_MODEL
 
 
-def call_claude(system, user_text, max_tokens=4000, schema=None):
+def call_claude(system, user_text, max_tokens=4000, schema=None, effort=None):
     """קריאה ל-Claude. מחזיר טקסט. זורק חריגות anthropic — לטפל בקורא."""
     import anthropic
     client = anthropic.Anthropic(api_key=get_api_key())
     kwargs = {}
+    output_config = {}
     if schema:
-        kwargs['output_config'] = {'format': {'type': 'json_schema', 'schema': schema}}
+        output_config['format'] = {'type': 'json_schema', 'schema': schema}
+    if effort:
+        output_config['effort'] = effort
+    if output_config:
+        kwargs['output_config'] = output_config
     msg = client.messages.create(
         model=get_model(),
         max_tokens=max_tokens,
@@ -1473,17 +1478,18 @@ def auto_answer_question(qid):
         raise ValueError('אין הנחיות מסומנות "בתוקף" במאגר המסמכים')
     if (q['proposed_answer'] or '').strip():
         raise ValueError('כבר קיים מענה מוצע — מחק אותו תחילה אם ברצונך בהצעה אוטומטית')
-    docs_text, budget = [], 45000
+    # תקציב טקסט שמור — הנחיות ארוכות נחתכות (מגבלות קצב + זמן תגובה של השרת)
+    docs_text, budget = [], 15000
     for d in directives:
-        chunk = f'=== הנחיה בתוקף: {d["title"]} ===\n{d["extracted_text"]}'[:budget]
+        chunk = f'=== הנחיה בתוקף: {d["title"]} ===\n{d["extracted_text"]}'[:max(budget, 0)]
+        if not chunk:
+            break
         docs_text.append(chunk)
         budget -= len(chunk)
-        if budget <= 0:
-            break
     raw = call_claude(_auto_answer_system(),
                       'ההנחיות שבתוקף:\n\n' + '\n\n'.join(docs_text) +
                       f'\n\n---\nהשאלה מהשטח:\n{q["content"][:2000]}',
-                      max_tokens=2000, schema=AUTO_ANSWER_SCHEMA)
+                      max_tokens=2000, schema=AUTO_ANSWER_SCHEMA, effort='low')
     data = json.loads(raw)
     answer = (data.get('answer') or '').strip()
     if not data.get('decisive') and 'תא רשויות מחוז' not in answer:
