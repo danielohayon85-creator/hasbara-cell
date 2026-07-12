@@ -301,7 +301,8 @@ def init_db():
         cols = [r['name'] for r in c.execute(f'PRAGMA table_info({table})').fetchall()]
         if col not in cols:
             c.execute(f'ALTER TABLE {table} ADD COLUMN {ddl}')
-    # (אין מיגרציות כרגע — התבנית מוכנה לעתיד)
+    add_col('documents', 'is_active_directive',
+            'is_active_directive INTEGER NOT NULL DEFAULT 0')
 
     if c.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 0:
         admin_pw = os.environ.get('ADMIN_PASSWORD') or ''.join(
@@ -907,6 +908,8 @@ def whatsapp_webhook():
     conn.commit()
     conn.close()
     alert_new_question(cur.lastrowid, body or '(מדיה)', profile or phone)
+    if body:
+        _auto_answer_bg(cur.lastrowid)
     return _twiml()
 
 
@@ -1121,6 +1124,7 @@ def _ingest_wa_file(md, sd, is_group, phone, sender_name, chat_name, wa_log):
             conn.commit()
             conn.close()
             alert_new_question(qcur.lastrowid, caption, sender_name)
+            _auto_answer_bg(qcur.lastrowid)
         return jsonify({'ok': True, 'document_id': doc_id})
     if ext in WA_IMG_EXTS and not is_group:
         # תמונה בפרטי — נפתחת שאלה עם התמונה כקובץ מצורף
@@ -1215,6 +1219,7 @@ def greenapi_webhook():
     conn.close()
     wa_log(f'✅ נקלטה שאלה #{cur.lastrowid}', f'{src_desc} | {text[:60]}')
     alert_new_question(cur.lastrowid, text, f'{sender_name}' + (f' ({chat_name})' if is_group else ''))
+    _auto_answer_bg(cur.lastrowid)
     return jsonify({'ok': True, 'question_id': cur.lastrowid})
 
 
@@ -1255,7 +1260,7 @@ def list_documents():
             where.append('(title LIKE ? OR extracted_text LIKE ? OR ai_summary LIKE ?)')
             params.extend([f'%{term}%'] * 3)
     sql = 'SELECT id, title, doc_type, source, orig_name, size, ai_summary, insights_generated_at, ' \
-          'uploaded_by_id, created_at FROM documents'
+          'is_active_directive, uploaded_by_id, created_at FROM documents'
     if where:
         sql += ' WHERE ' + ' AND '.join(where)
     sql += ' ORDER BY created_at DESC LIMIT 300'
@@ -1406,6 +1411,125 @@ def generate_insights(doc_id):
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'insights': data})
+
+
+@app.route('/api/documents/<int:doc_id>/directive', methods=['POST'])
+@roles_required('admin', 'lead')
+def toggle_directive(doc_id):
+    """סימון/ביטול מסמך כ'הנחיה בתוקף' — הבסיס למענה אוטומטי על שאלות נכנסות."""
+    active = 1 if request.get_json(force=True).get('active') else 0
+    conn = get_db()
+    conn.execute('UPDATE documents SET is_active_directive=? WHERE id=?', (active, doc_id))
+    log_action(conn, 'toggle_directive', 'document', doc_id, 'בתוקף' if active else 'הוסר מתוקף')
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'active': bool(active)})
+
+
+# ---------------------------------------------------------------- מענה אוטומטי מהנחיות בתוקף
+AUTO_ANSWER_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'answer': {'type': 'string', 'description': 'המענה המוצע לשאלה, בעברית פשוטה'},
+        'decisive': {'type': 'boolean',
+                     'description': 'האם ההנחיות נותנות תשובה חד-משמעית לשאלה'},
+        'based_on': {'type': 'string', 'description': 'על איזה סעיף/הנחיה מבוסס המענה'},
+    },
+    'required': ['answer', 'decisive', 'based_on'],
+    'additionalProperties': False,
+}
+
+DISCLAIMER = '⚠️ המענה אינו חד-משמעי על פי ההנחיות שבתוקף — יש לברר מול תא רשויות מחוז לפני מסירה סופית.'
+
+
+def _auto_answer_system():
+    return (
+        f'אתה קצין הסברה ב{DISTRICT_NAME} של פיקוד העורף. תפקידך להציע מענה לשאלה מהשטח '
+        'אך ורק על בסיס ההנחיות שבתוקף המצורפות. כללים מחייבים:\n'
+        '1. ענה רק ממה שכתוב בהנחיות. אל תמציא ואל תסתמך על ידע כללי.\n'
+        '2. אם ההנחיות עונות על השאלה באופן ברור — נסח מענה מלא וסמן decisive=true.\n'
+        '3. אם ההנחיות עונות חלקית, לא עונות, או ניתנות לפרשנות — נסח את מה שכן ידוע '
+        'בזהירות וסמן decisive=false.\n'
+        '4. כתוב בעברית פשוטה וברורה, מתאימה למסירה לפונה. החזר JSON בלבד.'
+    )
+
+
+def get_active_directives(conn):
+    return conn.execute(
+        "SELECT id, title, extracted_text FROM documents WHERE is_active_directive=1 "
+        "AND extracted_text IS NOT NULL AND extracted_text != '' ORDER BY created_at DESC").fetchall()
+
+
+def auto_answer_question(qid):
+    """מציע מענה לשאלה על בסיס ההנחיות בתוקף. מחזיר dict או זורק חריגה.
+    לא דורס מענה מוצע קיים."""
+    conn = get_db()
+    q = conn.execute('SELECT content, proposed_answer FROM questions WHERE id=?', (qid,)).fetchone()
+    directives = get_active_directives(conn)
+    conn.close()
+    if not q:
+        raise LookupError('שאלה לא נמצאה')
+    if not directives:
+        raise ValueError('אין הנחיות מסומנות "בתוקף" במאגר המסמכים')
+    if (q['proposed_answer'] or '').strip():
+        raise ValueError('כבר קיים מענה מוצע — מחק אותו תחילה אם ברצונך בהצעה אוטומטית')
+    docs_text, budget = [], 45000
+    for d in directives:
+        chunk = f'=== הנחיה בתוקף: {d["title"]} ===\n{d["extracted_text"]}'[:budget]
+        docs_text.append(chunk)
+        budget -= len(chunk)
+        if budget <= 0:
+            break
+    raw = call_claude(_auto_answer_system(),
+                      'ההנחיות שבתוקף:\n\n' + '\n\n'.join(docs_text) +
+                      f'\n\n---\nהשאלה מהשטח:\n{q["content"][:2000]}',
+                      max_tokens=2000, schema=AUTO_ANSWER_SCHEMA)
+    data = json.loads(raw)
+    answer = (data.get('answer') or '').strip()
+    if not data.get('decisive') and 'תא רשויות מחוז' not in answer:
+        answer += '\n\n' + DISCLAIMER
+    titles = ', '.join(d['title'] for d in directives[:3])
+    conn = get_db()
+    conn.execute('UPDATE questions SET proposed_answer=?, updated_at=? '
+                 "WHERE id=? AND (proposed_answer IS NULL OR proposed_answer='')",
+                 (answer, now(), qid))
+    log_history(conn, qid, 'ai_draft',
+                f'הוצע מענה אוטומטי על בסיס ההנחיות בתוקף ({titles}) — '
+                + ('חד-משמעי' if data.get('decisive') else 'לא חד-משמעי, נוסף סייג'),
+                user_id=None)
+    conn.commit()
+    conn.close()
+    return {'answer': answer, 'decisive': bool(data.get('decisive')), 'based_on': data.get('based_on')}
+
+
+def _auto_answer_bg(qid):
+    """מענה אוטומטי ברקע לשאלה שנכנסה מוואטסאפ — כשל שקט (אפשר להציע ידנית מהמסך)."""
+    if not ai_enabled():
+        return
+    import threading
+
+    def worker():
+        try:
+            auto_answer_question(qid)
+        except Exception:
+            pass
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.route('/api/questions/<int:qid>/auto-answer', methods=['POST'])
+def auto_answer_endpoint(qid):
+    if not ai_enabled():
+        return jsonify({'error': 'מפתח AI לא מוגדר'}), 400
+    try:
+        return jsonify({'ok': True, **auto_answer_question(qid)})
+    except LookupError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except json.JSONDecodeError:
+        return jsonify({'error': 'תשובת ה-AI לא תקינה — נסה שוב'}), 502
+    except Exception as e:
+        return ai_error(e)
 
 
 @app.route('/api/documents/<int:doc_id>/to-message', methods=['POST'])

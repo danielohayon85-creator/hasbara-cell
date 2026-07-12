@@ -430,7 +430,9 @@ async function openQuestion(qid) {
     <p class="muted">נפתחה: ${fmtDT(q.opened_at)} ${q.asker_name ? '· פונה: ' + esc(q.asker_name) : ''}
       ${q.asker_phone ? '· ' + esc(q.asker_phone) : ''} ${q.authority ? '· רשות: ' + esc(q.authority) : ''}</p>
     ${canWrite() ? questionFormFields(q) : `<div class="summary-box">${esc(q.content)}</div>`}
-    <div class="field"><label>מענה מוצע</label>
+    <div class="field"><label>מענה מוצע
+      ${canWrite() && META.ai_enabled ? `<button class="btn sm ghost" id="qAutoAnswer" style="margin-inline-start:8px">🤖 הצע מענה מההנחיות שבתוקף</button>
+      <span id="qAASpin" class="hidden"><span class="spinner"></span>בוחן מול ההנחיות...</span>` : ''}</label>
       <textarea id="qProposed" ${canWrite() ? '' : 'readonly'}>${esc(q.proposed_answer || '')}</textarea></div>
     ${q.approved_answer ? `<div class="field"><label>✅ מענה מאושר (${esc(q.approved_by_name || '')}, ${fmtDT(q.answered_at)})</label>
       <div class="summary-box" style="max-height:150px">${esc(q.approved_answer)}</div>
@@ -463,6 +465,22 @@ async function openQuestion(qid) {
 
   const copyBtn = m.querySelector('#copyAnswer');
   if (copyBtn) copyBtn.addEventListener('click', () => copyText(q.approved_answer));
+
+  const autoBtn = m.querySelector('#qAutoAnswer');
+  if (autoBtn) autoBtn.addEventListener('click', async () => {
+    const cur = m.querySelector('#qProposed').value.trim();
+    if (cur && !confirm('קיים מענה מוצע — להחליף בהצעה אוטומטית מההנחיות?')) return;
+    autoBtn.disabled = true;
+    m.querySelector('#qAASpin').classList.remove('hidden');
+    try {
+      if (cur) await api('/api/questions/' + qid, { method: 'PUT', body: { proposed_answer: '' } });
+      const r = await api(`/api/questions/${qid}/auto-answer`, { method: 'POST' });
+      m.querySelector('#qProposed').value = r.answer;
+      toast(r.decisive ? '🤖 הוצע מענה חד-משמעי מההנחיות' : '🤖 הוצע מענה עם סייג — ההנחיות לא חד-משמעיות');
+    } catch (e) { toast(e.message, true); }
+    autoBtn.disabled = false;
+    m.querySelector('#qAASpin').classList.add('hidden');
+  });
 
   const sendWABtn = m.querySelector('#sendWA');
   if (sendWABtn) sendWABtn.addEventListener('click', async () => {
@@ -550,8 +568,9 @@ async function loadDocuments() {
   const el = $('#docList');
   if (!rows.length) { el.innerHTML = '<div class="empty">אין מסמכים. העלה מסמך ראשון.</div>'; return; }
   el.innerHTML = `<div class="table-wrap"><table class="list">
-    <tr><th>שם</th><th>סוג</th><th>מקור</th><th>הועלה</th><th>ע"י</th><th>תובנות</th></tr>
+    <tr><th></th><th>שם</th><th>סוג</th><th>מקור</th><th>הועלה</th><th>ע"י</th><th>תובנות</th></tr>
     ${rows.map(d => `<tr class="clickable" data-d="${d.id}">
+      <td>${d.is_active_directive ? '<span title="הנחיה בתוקף — שאלות נכנסות נבחנות מולה">📌</span>' : ''}</td>
       <td>${esc(d.title)}</td><td>${esc(d.doc_type || '')}</td><td>${esc(d.source || '')}</td>
       <td class="muted">${fmtDT(d.created_at)}</td><td>${esc(d.uploaded_by_name || '')}</td>
       <td>${d.insights_generated_at ? '<span class="ai-tag">✓ הופקו</span>' : '<span class="muted">—</span>'}</td>
@@ -617,9 +636,12 @@ async function openDocument(docId) {
       <button class="btn" id="dSave">💾 שמור</button>
       <button class="btn ghost" id="dToMsg">📢 צור מסר מהתובנות</button>
       <button class="btn ghost" id="dToOut">📤 צור הודעה להפצה</button>
+      ${isLead() ? `<button class="btn ${d.is_active_directive ? 'amber' : ''}" id="dDirective">
+        ${d.is_active_directive ? '📌 הסר מ"הנחיות בתוקף"' : '📌 סמן כהנחיה בתוקף'}</button>` : ''}
       ${isLead() ? '<button class="btn danger" id="dDelete">מחק מסמך</button>' : ''}
       <button class="btn ghost" onclick="closeModal()">סגור</button>
-    </div>` : '<div class="btn-row"><button class="btn ghost" onclick="closeModal()">סגור</button></div>'}
+    </div>
+    ${d.is_active_directive ? '<p class="muted">📌 מסמך זה מסומן כהנחיה בתוקף — כל שאלה שנכנסת מוואטסאפ נבחנת מולו ומוצע לה מענה אוטומטי.</p>' : ''}` : '<div class="btn-row"><button class="btn ghost" onclick="closeModal()">סגור</button></div>'}
   `, true);
 
   if (!canWrite()) return;
@@ -669,6 +691,20 @@ async function openDocument(docId) {
       if (st) { st.value = 'document'; st.dispatchEvent(new Event('change')); }
       setTimeout(() => { if (si) si.value = docId; }, 300);
     }, 300);
+  });
+
+  const dirBtn = m.querySelector('#dDirective');
+  if (dirBtn) dirBtn.addEventListener('click', async () => {
+    const activating = !d.is_active_directive;
+    if (activating && !(d.extracted_text || '').trim() && !m.querySelector('#dExtracted').value.trim()) {
+      toast('למסמך אין טקסט מחולץ — המענה האוטומטי לא יוכל להתבסס עליו', true);
+      return;
+    }
+    try {
+      await api(`/api/documents/${docId}/directive`, { method: 'POST', body: { active: activating } });
+      toast(activating ? '📌 המסמך סומן כהנחיה בתוקף — שאלות נכנסות ייבחנו מולו' : 'המסמך הוסר מההנחיות בתוקף');
+      closeModal(); loadDocuments();
+    } catch (e) { toast(e.message, true); }
   });
 
   const del = m.querySelector('#dDelete');
