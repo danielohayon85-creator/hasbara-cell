@@ -928,6 +928,9 @@ async function renderActivities() {
       </div>
       <div id="actList"><div class="empty">טוען...</div></div>
     </div>`;
+  const today = new Date().toLocaleDateString('en-CA');
+  $('#aFrom').value = today;
+  $('#aTo').value = today;
   if (canWrite()) $('#newAct').addEventListener('click', () => activityForm());
   $('#aApply').addEventListener('click', loadActivities);
   loadActivities();

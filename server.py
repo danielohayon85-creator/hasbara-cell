@@ -1015,10 +1015,6 @@ def _classify_group_message(text):
 def greenapi_webhook():
     """Webhook ל-Green API: קולט הודעות ממספר ייעודי וגם מקבוצות שהבוט חבר בהן.
     הודעה פרטית — נקלטת תמיד; הודעת קבוצה — רק אם סווגה כרלוונטית לתא."""
-    token = request.args.get('token', '')
-    if not WEBHOOK_TOKEN or not hmac.compare_digest(token, WEBHOOK_TOKEN):
-        return jsonify({'error': 'forbidden'}), 403
-    d = request.get_json(silent=True) or {}
 
     def wa_log(decision, detail=''):
         conn2 = get_db()
@@ -1026,6 +1022,14 @@ def greenapi_webhook():
                    f'{decision}' + (f' | {detail}' if detail else ''))
         conn2.commit()
         conn2.close()
+
+    token = request.args.get('token', '')
+    if not WEBHOOK_TOKEN or not hmac.compare_digest(token, WEBHOOK_TOKEN):
+        # נרשם ביומן כדי שאפשר יהיה לאבחן כתובת webhook שהודבקה בלי טוקן / עם טוקן שגוי
+        wa_log('❌ נדחה — טוקן שגוי או חסר בכתובת ה-webhook',
+               'ודא שהכתובת ב-Green API כוללת את ?token=... במלואו')
+        return jsonify({'error': 'forbidden'}), 403
+    d = request.get_json(silent=True) or {}
 
     if d.get('typeWebhook') != 'incomingMessageReceived':
         wa_log('התעלמות — אירוע מסוג אחר', d.get('typeWebhook') or 'ללא סוג')
