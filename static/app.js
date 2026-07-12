@@ -1383,11 +1383,25 @@ async function loadSysStatus() {
         <button class="btn sm ghost" id="gaCopy">📋</button></div>` : ''}
       <div class="hist-item">🌐 סביבה: ${s.is_prod ? 'פרודקשן (Render)' : 'פיתוח מקומי'}</div>
       <div class="hist-item">📦 גיבוי: <a class="btn sm" href="/api/backup">הורד גיבוי מלא (ZIP)</a>
-        <span class="muted">כולל את כל הנתונים והקבצים. מומלץ אחת לשבוע — שמור בדרייב/מחשב.</span></div>`;
+        <span class="muted">כולל את כל הנתונים והקבצים. מומלץ אחת לשבוע — שמור בדרייב/מחשב.</span></div>
+      <div class="hist-item"><b>📡 יומן וואטסאפ (אבחון קליטה)</b>
+        <button class="btn sm ghost" id="waLogRefresh">🔄 רענן</button>
+        <div id="waLog" class="muted" style="margin-top:6px">טוען...</div></div>`;
     const wc = $('#whCopy');
     if (wc) wc.addEventListener('click', () => copyText(s.webhook_url));
     const gc = $('#gaCopy');
     if (gc) gc.addEventListener('click', () => copyText(s.greenapi_url));
+    const loadWaLog = async () => {
+      try {
+        const rows = await api('/api/settings/wa-log');
+        $('#waLog').innerHTML = rows.length
+          ? rows.map(r => `<div style="border-bottom:1px dashed var(--line);padding:3px 0">
+              <span class="muted">${fmtDT(r.created_at)}</span> — ${esc(r.detail || '')}</div>`).join('')
+          : '<i>אף אירוע וואטסאפ לא הגיע לשרת עדיין. אם שלחת הודעה וזה ריק — ה-webhook לא מוגדר נכון בצד Green API.</i>';
+      } catch (e) { $('#waLog').textContent = e.message; }
+    };
+    $('#waLogRefresh').addEventListener('click', loadWaLog);
+    loadWaLog();
     $('#gaSave').addEventListener('click', async () => {
       const instance_id = $('#gaInstance').value.trim();
       const token = $('#gaToken').value.trim();

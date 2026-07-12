@@ -1019,23 +1019,35 @@ def greenapi_webhook():
     if not WEBHOOK_TOKEN or not hmac.compare_digest(token, WEBHOOK_TOKEN):
         return jsonify({'error': 'forbidden'}), 403
     d = request.get_json(silent=True) or {}
+
+    def wa_log(decision, detail=''):
+        conn2 = get_db()
+        log_action(conn2, 'wa_webhook', 'webhook', None,
+                   f'{decision}' + (f' | {detail}' if detail else ''))
+        conn2.commit()
+        conn2.close()
+
     if d.get('typeWebhook') != 'incomingMessageReceived':
+        wa_log('התעלמות — אירוע מסוג אחר', d.get('typeWebhook') or 'ללא סוג')
         return jsonify({'ok': True})
     md = d.get('messageData') or {}
     text = ((md.get('textMessageData') or {}).get('textMessage')
             or (md.get('extendedTextMessageData') or {}).get('text') or '').strip()
-    if not text:
-        return jsonify({'ok': True})
     sd = d.get('senderData') or {}
     chat_id = sd.get('chatId') or ''
     is_group = chat_id.endswith('@g.us')
     phone = normalize_phone((sd.get('sender') or '').split('@')[0])
     sender_name = sd.get('senderName') or phone
     chat_name = sd.get('chatName') or ''
+    src_desc = f'קבוצה: {chat_name}' if is_group else f'פרטי: {sender_name}'
+    if not text:
+        wa_log('התעלמות — הודעה בלי טקסט', f'{src_desc} | {md.get("typeMessage") or ""}')
+        return jsonify({'ok': True})
     topic = None
     if is_group:
         relevant, topic = _classify_group_message(text)
         if not relevant:
+            wa_log('סונן — לא רלוונטי לתא', f'{src_desc} | {text[:60]}')
             return jsonify({'ok': True, 'skipped': 'not relevant'})
     conn = get_db()
     recent = (now_dt() - timedelta(minutes=2)).isoformat(timespec='seconds')
@@ -1043,6 +1055,7 @@ def greenapi_webhook():
                        (phone, text, recent)).fetchone()
     if dup:
         conn.close()
+        wa_log('התעלמות — כפילות', f'{src_desc} | שאלה #{dup["id"]}')
         return jsonify({'ok': True, 'skipped': 'duplicate'})
     notes = f'נקלט מקבוצת וואטסאפ: {chat_name}' if is_group else None
     cur = conn.execute(
@@ -1056,6 +1069,7 @@ def greenapi_webhook():
                 user_id=None)
     conn.commit()
     conn.close()
+    wa_log(f'✅ נקלטה שאלה #{cur.lastrowid}', f'{src_desc} | {text[:60]}')
     return jsonify({'ok': True, 'question_id': cur.lastrowid})
 
 
@@ -2219,6 +2233,18 @@ def set_model():
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
+
+
+@app.route('/api/settings/wa-log')
+@roles_required('admin')
+def wa_webhook_log():
+    """יומן אירועי וואטסאפ אחרונים — לאבחון קליטה."""
+    conn = get_db()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT detail, created_at FROM audit_log WHERE action='wa_webhook' "
+        'ORDER BY id DESC LIMIT 20')]
+    conn.close()
+    return jsonify(rows)
 
 
 @app.route('/api/backup')
