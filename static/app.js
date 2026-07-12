@@ -610,80 +610,119 @@ function uploadDocModal() {
 }
 
 const INSIGHT_FIELDS = [
-  ['ai_summary', 'תקציר'], ['ai_key_points', 'עיקרי הדברים'], ['ai_messages', 'מסרים מרכזיים'],
-  ['ai_qa', 'שאלות ותשובות'], ['ai_gaps', 'פערים שדורשים הבהרה'], ['ai_draft_message', 'נוסח הודעה מוצע'],
+  ['ai_summary', 'תקציר', '📋', ''],
+  ['ai_key_points', 'עיקרי הדברים', '🔑', ''],
+  ['ai_messages', 'מסרים מרכזיים', '📢', 'msg'],
+  ['ai_qa', 'שאלות ותשובות', '❓', ''],
+  ['ai_gaps', 'פערים שדורשים הבהרה', '⚠️', 'warn'],
+  ['ai_draft_message', 'נוסח הודעה מוצע להפצה', '✉️', 'msg'],
 ];
 
-async function openDocument(docId) {
+async function openDocument(docId, editMode = false) {
   const d = await api('/api/documents/' + docId);
-  const m = modal(`
+  const hasInsights = INSIGHT_FIELDS.some(([f]) => (d[f] || '').trim());
+
+  const header = `
     <div class="row" style="justify-content:space-between">
       <h2 style="margin:0">📄 ${esc(d.title)}</h2>
       <a class="btn sm ghost" href="/api/documents/${d.id}/download">⬇️ הורד קובץ</a>
     </div>
-    <p class="muted">${esc(d.doc_type || 'מסמך')} · ${esc(d.source || '')} · הועלה ${fmtDT(d.created_at)} ע"י ${esc(d.uploaded_by_name || '')}
-      ${d.insights_generated_at ? `· <span class="ai-tag">תובנות: ${fmtDT(d.insights_generated_at)} (${esc(d.insights_model || '')})</span>` : ''}</p>
-    ${canWrite() && META.ai_enabled ? `<div class="btn-row" style="margin-bottom:10px">
-      <button class="btn" id="genInsights">🤖 הפק תובנות${d.insights_generated_at ? ' מחדש' : ''}</button>
-      <span id="aiSpin" class="hidden"><span class="spinner"></span>מנתח מסמך... (עשוי לקחת עד דקה)</span>
-    </div>` : (!META.ai_enabled ? '<p class="muted">🤖 מפתח AI לא מוגדר — ניתן למלא את שדות התובנות ידנית.</p>' : '')}
-    <div class="field"><label>טקסט מחולץ (ניתן לעריכה/הדבקה)</label>
-      <textarea id="dExtracted" style="min-height:90px" ${canWrite() ? '' : 'readonly'}>${esc(d.extracted_text || '')}</textarea></div>
-    ${INSIGHT_FIELDS.map(([f, label]) => `
-      <div class="field"><label>${label}</label>
-        <textarea id="f_${f}" ${canWrite() ? '' : 'readonly'}>${esc(d[f] || '')}</textarea></div>`).join('')}
-    ${canWrite() ? `<div class="btn-row">
-      <button class="btn" id="dSave">💾 שמור</button>
-      <button class="btn ghost" id="dToMsg">📢 צור מסר מהתובנות</button>
-      <button class="btn ghost" id="dToOut">📤 צור הודעה להפצה</button>
-      ${isLead() ? `<button class="btn ${d.is_active_directive ? 'amber' : ''}" id="dDirective">
-        ${d.is_active_directive ? '📌 הסר מ"הנחיות בתוקף"' : '📌 סמן כהנחיה בתוקף'}</button>` : ''}
-      ${isLead() ? '<button class="btn danger" id="dDelete">מחק מסמך</button>' : ''}
+    <p class="muted">${esc(d.doc_type || 'מסמך')}${d.source ? ' · ' + esc(d.source) : ''} · הועלה ${fmtDT(d.created_at)}${d.uploaded_by_name ? ' ע"י ' + esc(d.uploaded_by_name) : ''}
+      ${d.insights_generated_at ? `· <span class="ai-tag">תובנות: ${fmtDT(d.insights_generated_at)}</span>` : ''}
+      ${d.is_active_directive ? '· <span class="chip st-ממתין-לאישור">📌 הנחיה בתוקף</span>' : ''}</p>`;
+
+  let bodyHtml;
+  if (!editMode) {
+    // מצב קריאה — כרטיסים נקיים, רק שדות עם תוכן
+    const sections = INSIGHT_FIELDS.map(([f, label, icon, cls]) => {
+      const val = (d[f] || '').trim();
+      if (!val) return '';
+      return `<div class="doc-section ${cls}"><h4><span>${icon} ${label}</span>
+        <button class="btn sm ghost" data-copyf="${f}" title="העתק">📋</button></h4>
+        <div class="content">${esc(val)}</div></div>`;
+    }).join('');
+    bodyHtml = `
+      ${canWrite() && META.ai_enabled ? `<div class="btn-row" style="margin-bottom:12px">
+        <button class="btn" id="genInsights">🤖 ${hasInsights ? 'הפק תובנות מחדש' : 'הפק תובנות'}</button>
+        <span id="aiSpin" class="hidden"><span class="spinner"></span>מנתח מסמך... (עד דקה)</span>
+      </div>` : ''}
+      ${sections || `<div class="empty">${META.ai_enabled ? 'עדיין אין תובנות למסמך — לחץ "הפק תובנות", או מלא ידנית דרך עריכה.' : 'אין תובנות. מפתח AI לא מוגדר — ניתן למלא ידנית דרך עריכה.'}</div>`}
+      <details class="doc-raw"><summary>📃 הצג את הטקסט המחולץ מהקובץ (${(d.extracted_text || '').length.toLocaleString()} תווים)</summary>
+        <pre>${esc(d.extracted_text || 'אין טקסט מחולץ')}</pre></details>`;
+  } else {
+    // מצב עריכה — תיבות טקסט לכל השדות
+    bodyHtml = `
+      <div class="field"><label>טקסט מחולץ (ניתן להדבקה ידנית)</label>
+        <textarea id="dExtracted" style="min-height:90px">${esc(d.extracted_text || '')}</textarea></div>
+      ${INSIGHT_FIELDS.map(([f, label, icon]) => `
+        <div class="field"><label>${icon} ${label}</label>
+          <textarea id="f_${f}">${esc(d[f] || '')}</textarea></div>`).join('')}`;
+  }
+
+  const buttons = canWrite() ? `
+    <div class="btn-row" style="margin-top:12px">
+      ${editMode
+        ? `<button class="btn" id="dSave">💾 שמור</button>
+           <button class="btn ghost" id="dRead">↩ חזרה לתצוגה</button>`
+        : `<button class="btn ghost" id="dEdit">✏️ עריכה</button>
+           <button class="btn ghost" id="dToMsg">📢 צור מסר</button>
+           <button class="btn ghost" id="dToOut">📤 צור הודעה</button>
+           ${isLead() ? `<button class="btn ${d.is_active_directive ? 'amber' : 'ghost'}" id="dDirective">${d.is_active_directive ? '📌 הסר מ"הנחיות בתוקף"' : '📌 סמן כהנחיה בתוקף'}</button>` : ''}
+           ${isLead() ? '<button class="btn danger" id="dDelete">מחק</button>' : ''}`}
       <button class="btn ghost" onclick="closeModal()">סגור</button>
-    </div>
-    ${d.is_active_directive ? '<p class="muted">📌 מסמך זה מסומן כהנחיה בתוקף — כל שאלה שנכנסת מוואטסאפ נבחנת מולו ומוצע לה מענה אוטומטי.</p>' : ''}` : '<div class="btn-row"><button class="btn ghost" onclick="closeModal()">סגור</button></div>'}
-  `, true);
+    </div>` : '<div class="btn-row"><button class="btn ghost" onclick="closeModal()">סגור</button></div>';
+
+  const m = modal(header + bodyHtml + buttons, true);
+
+  m.querySelectorAll('[data-copyf]').forEach(b =>
+    b.addEventListener('click', () => copyText(d[b.dataset.copyf] || '')));
 
   if (!canWrite()) return;
 
   const gen = m.querySelector('#genInsights');
   if (gen) gen.addEventListener('click', async () => {
-    const hasContent = INSIGHT_FIELDS.some(([f]) => m.querySelector('#f_' + f).value.trim());
-    if (hasContent && !confirm('קיימות תובנות בשדות — להחליף אותן בתובנות חדשות?')) return;
+    if (hasInsights && !confirm('להפיק תובנות חדשות? התובנות הקיימות יוחלפו.')) return;
     gen.disabled = true;
     m.querySelector('#aiSpin').classList.remove('hidden');
     try {
-      // שמירת הטקסט המחולץ קודם (אם המשתמש הדביק ידנית)
-      await api('/api/documents/' + docId, { method: 'PUT', body: { extracted_text: m.querySelector('#dExtracted').value } });
       const r = await api(`/api/documents/${docId}/insights`, { method: 'POST' });
       if (r.error) { toast(r.error, true); }
       else {
         toast('התובנות הופקו');
-        const map = { summary: 'ai_summary', key_points: 'ai_key_points', messages: 'ai_messages', qa: 'ai_qa', gaps: 'ai_gaps', draft_message: 'ai_draft_message' };
-        for (const [k, f] of Object.entries(map)) m.querySelector('#f_' + f).value = r.insights[k] || '';
+        closeModal(); openDocument(docId); loadDocuments();
+        return;
       }
     } catch (e) { toast(e.message, true); }
     gen.disabled = false;
     m.querySelector('#aiSpin').classList.add('hidden');
   });
 
-  m.querySelector('#dSave').addEventListener('click', async () => {
+  const editBtn = m.querySelector('#dEdit');
+  if (editBtn) editBtn.addEventListener('click', () => { closeModal(); openDocument(docId, true); });
+
+  const readBtn = m.querySelector('#dRead');
+  if (readBtn) readBtn.addEventListener('click', () => { closeModal(); openDocument(docId); });
+
+  const saveBtn = m.querySelector('#dSave');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
     const body = { extracted_text: m.querySelector('#dExtracted').value };
     for (const [f] of INSIGHT_FIELDS) body[f] = m.querySelector('#f_' + f).value;
     try {
       await api('/api/documents/' + docId, { method: 'PUT', body });
-      toast('נשמר'); closeModal(); loadDocuments();
+      toast('נשמר'); closeModal(); openDocument(docId); loadDocuments();
     } catch (e) { toast(e.message, true); }
   });
 
-  m.querySelector('#dToMsg').addEventListener('click', async () => {
+  const toMsg = m.querySelector('#dToMsg');
+  if (toMsg) toMsg.addEventListener('click', async () => {
     try {
       await api(`/api/documents/${docId}/to-message`, { method: 'POST' });
       toast('נוצר מסר (טיוטה) מהמסמך'); closeModal(); switchTab('messages');
     } catch (e) { toast(e.message, true); }
   });
 
-  m.querySelector('#dToOut').addEventListener('click', () => {
+  const toOut = m.querySelector('#dToOut');
+  if (toOut) toOut.addEventListener('click', () => {
     closeModal();
     switchTab('outgoing');
     setTimeout(() => {
@@ -696,7 +735,7 @@ async function openDocument(docId) {
   const dirBtn = m.querySelector('#dDirective');
   if (dirBtn) dirBtn.addEventListener('click', async () => {
     const activating = !d.is_active_directive;
-    if (activating && !(d.extracted_text || '').trim() && !m.querySelector('#dExtracted').value.trim()) {
+    if (activating && !(d.extracted_text || '').trim()) {
       toast('למסמך אין טקסט מחולץ — המענה האוטומטי לא יוכל להתבסס עליו', true);
       return;
     }
