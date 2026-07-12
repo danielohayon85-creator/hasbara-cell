@@ -650,13 +650,17 @@ async function openDocument(docId, editMode = false) {
       <details class="doc-raw"><summary>📃 הצג את הטקסט המחולץ מהקובץ (${(d.extracted_text || '').length.toLocaleString()} תווים)</summary>
         <pre>${esc(d.extracted_text || 'אין טקסט מחולץ')}</pre></details>`;
   } else {
-    // מצב עריכה — תיבות טקסט לכל השדות
+    // מצב עריכה — תיבות טקסט גדולות לכל השדות
     bodyHtml = `
+      ${canWrite() && META.ai_enabled ? `<div class="btn-row" style="margin-bottom:12px">
+        <button class="btn" id="genInsights">🤖 ג'נרט תובנות מחדש (שומר קודם את השינויים)</button>
+        <span id="aiSpin" class="hidden"><span class="spinner"></span>מנתח מסמך... (עד דקה)</span>
+      </div>` : ''}
       <div class="field"><label>טקסט מחולץ (ניתן להדבקה ידנית)</label>
-        <textarea id="dExtracted" style="min-height:90px">${esc(d.extracted_text || '')}</textarea></div>
+        <textarea id="dExtracted" style="min-height:160px">${esc(d.extracted_text || '')}</textarea></div>
       ${INSIGHT_FIELDS.map(([f, label, icon]) => `
         <div class="field"><label>${icon} ${label}</label>
-          <textarea id="f_${f}">${esc(d[f] || '')}</textarea></div>`).join('')}`;
+          <textarea id="f_${f}" style="min-height:140px">${esc(d[f] || '')}</textarea></div>`).join('')}`;
   }
 
   const buttons = canWrite() ? `
@@ -685,11 +689,17 @@ async function openDocument(docId, editMode = false) {
     gen.disabled = true;
     m.querySelector('#aiSpin').classList.remove('hidden');
     try {
+      // במצב עריכה — שומרים קודם את כל מה שהוקלד (כולל טקסט שהודבק ידנית)
+      if (editMode) {
+        const body = { extracted_text: m.querySelector('#dExtracted').value };
+        for (const [f] of INSIGHT_FIELDS) body[f] = m.querySelector('#f_' + f).value;
+        await api('/api/documents/' + docId, { method: 'PUT', body });
+      }
       const r = await api(`/api/documents/${docId}/insights`, { method: 'POST' });
       if (r.error) { toast(r.error, true); }
       else {
         toast('התובנות הופקו');
-        closeModal(); openDocument(docId); loadDocuments();
+        closeModal(); openDocument(docId, editMode); loadDocuments();
         return;
       }
     } catch (e) { toast(e.message, true); }
