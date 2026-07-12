@@ -878,7 +878,10 @@ async function renderCanned() {
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <h2 style="margin:0">🗂 בנק הודעות מוכנות מראש</h2>
-        ${canWrite() ? '<button class="btn" id="newCanned">+ תבנית חדשה</button>' : ''}
+        <div class="row" style="gap:8px">
+          <button class="btn" id="cnWizard">🪄 מחולל הודעות</button>
+          ${canWrite() ? '<button class="btn ghost" id="newCanned">+ תבנית חדשה</button>' : ''}
+        </div>
       </div>
       <p class="muted">הודעות מנוסחות מראש לתרחישי חירום — ממלאים את ה[סוגריים] ומפיצים. חוסך דקות קריטיות באירוע.</p>
       <div class="filters">
@@ -888,6 +891,7 @@ async function renderCanned() {
       <div id="cannedList"><div class="empty">טוען...</div></div>
     </div>`;
   if (canWrite()) $('#newCanned').addEventListener('click', () => cannedForm());
+  $('#cnWizard').addEventListener('click', () => cannedWizard());
   $('#cnApply').addEventListener('click', loadCanned);
   loadCanned();
 }
@@ -906,12 +910,15 @@ async function loadCanned() {
       <div style="white-space:pre-wrap;font-size:14px;margin:8px 0">${esc(cm.body)}</div>
       ${cm.notes ? `<div class="muted">📌 ${esc(cm.notes)}</div>` : ''}
       <div class="btn-row">
-        <button class="btn sm" data-use="${cm.id}">📤 שלח להפצה</button>
+        <button class="btn sm" data-fill="${cm.id}">🪄 מלא תבנית</button>
+        <button class="btn sm ghost" data-use="${cm.id}">📤 שלח להפצה</button>
         <button class="btn sm ghost" data-copy="${cm.id}">📋 העתק</button>
         ${canWrite() ? `<button class="btn sm ghost" data-edit="${cm.id}">✏️ ערוך</button>` : ''}
         ${isLead() ? `<button class="btn sm danger" data-del="${cm.id}">מחק</button>` : ''}
       </div>
     </div>`).join('');
+  el.querySelectorAll('[data-fill]').forEach(b => b.addEventListener('click', () =>
+    cannedWizard(rows.find(x => x.id === +b.dataset.fill), rows)));
   el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () =>
     copyText(rows.find(x => x.id === +b.dataset.copy).body)));
   el.querySelectorAll('[data-use]').forEach(b => b.addEventListener('click', () => {
@@ -934,7 +941,7 @@ async function loadCanned() {
 }
 
 function cannedForm(cm = null) {
-  const isEdit = !!cm;
+  const isEdit = !!(cm && cm.id);
   const m = modal(`
     <h2>${isEdit ? 'עריכת תבנית' : 'תבנית הודעה חדשה'}</h2>
     <div class="field"><label>כותרת התבנית *</label><input id="cnTitle" value="${esc(cm ? cm.title : '')}"></div>
@@ -962,6 +969,129 @@ function cannedForm(cm = null) {
       closeModal(); toast('נשמר'); loadCanned();
     } catch (e) { toast(e.message, true); }
   });
+}
+
+/* ---------------- מחולל הודעות ---------------- */
+// [שדה] בגוף התבנית = שדה למילוי. ללא ] [ או ירידת שורה בתוך הסוגריים.
+const PLACEHOLDER_RE = /\[([^\[\]\n]{1,60})\]/g;
+
+function extractTokens(body) {
+  const seen = new Set(), out = [];
+  let m;
+  PLACEHOLDER_RE.lastIndex = 0;
+  while ((m = PLACEHOLDER_RE.exec(body))) {
+    if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]); }
+  }
+  return out;
+}
+
+function fillTemplate(body, values) {
+  return body.replace(PLACEHOLDER_RE, (whole, tok) =>
+    (values[tok] || '').trim() ? values[tok].trim() : whole);
+}
+
+async function cannedWizard(cm = null, rows = null) {
+  if (!rows) {
+    try { rows = await api('/api/canned'); } catch (e) { toast(e.message, true); return; }
+  }
+  if (!rows.length) { toast('אין תבניות בבנק ההודעות', true); return; }
+  const byCat = {};
+  rows.forEach(r => { const k = r.category || 'אחר'; (byCat[k] = byCat[k] || []).push(r); });
+  const pickerHtml = cm ? '' : `
+    <div class="field"><label>תבנית</label>
+      <select id="wzPick">${Object.entries(byCat).map(([cat, list]) =>
+        `<optgroup label="${esc(cat)}">${list.map(t =>
+          `<option value="${t.id}">${esc(t.title)}</option>`).join('')}</optgroup>`).join('')}</select></div>`;
+  const m = modal(`
+    <h2>🪄 מחולל הודעות</h2>
+    <p class="muted">ממלאים את השדות — וההודעה מוכנה להעתקה או להפצה.</p>
+    ${pickerHtml}
+    <div id="wzFields"></div>
+    <div class="field"><label>תצוגה מקדימה</label>
+      <div id="wzPreview" dir="rtl" style="white-space:pre-wrap;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:14px;min-height:60px;background:#fafafa"></div>
+      <div id="wzCount" class="muted" style="margin-top:4px"></div></div>
+    <div class="btn-row">
+      <button class="btn" id="wzSend">📤 שלח להפצה</button>
+      <button class="btn ghost" id="wzCopy">📋 העתק</button>
+      ${canWrite() ? '<button class="btn ghost" id="wzSave">💾 שמור כתבנית</button>' : ''}
+      ${META.ai_enabled && canWrite() ? '<button class="btn ghost" id="wzAI">🤖 שיפור ניסוח</button>' : ''}
+      <button class="btn ghost" onclick="closeModal()">סגור</button>
+    </div>`, true);
+
+  let cur = cm || byCat[Object.keys(byCat)[0]][0];
+  let aiBody = null; // תוצאת שיפור AI — מתאפסת בכל שינוי שדה/תבנית
+
+  const values = () => {
+    const v = {};
+    m.querySelectorAll('#wzFields input[data-tok]').forEach(i => { v[i.dataset.tok] = i.value; });
+    return v;
+  };
+  const filled = () => aiBody !== null ? aiBody : fillTemplate(cur.body, values());
+
+  function renderPreview() {
+    const text = filled();
+    const left = (text.match(PLACEHOLDER_RE) || []).length;
+    m.querySelector('#wzPreview').innerHTML = esc(text).replace(PLACEHOLDER_RE,
+      w => `<mark style="background:#fde68a;border-radius:3px">${w}</mark>`);
+    m.querySelector('#wzCount').textContent =
+      left ? `נותרו ${left} שדות למילוי` : 'כל השדות מולאו ✓';
+  }
+
+  function renderFields() {
+    const toks = extractTokens(cur.body);
+    m.querySelector('#wzFields').innerHTML = toks.length
+      ? toks.map(t => `<div class="field"><label>${esc(t)}</label><input dir="auto" data-tok="${esc(t)}"></div>`).join('')
+      : '<p class="muted">בתבנית זו אין [שדות] למילוי — ניתן להעתיק או לשלוח כמות שהיא.</p>';
+    renderPreview();
+  }
+
+  m.querySelector('#wzFields').addEventListener('input', () => { aiBody = null; renderPreview(); });
+  const pick = m.querySelector('#wzPick');
+  if (pick) {
+    if (!cm) pick.value = String(cur.id);
+    pick.addEventListener('change', () => {
+      cur = rows.find(x => x.id === +pick.value);
+      aiBody = null;
+      renderFields();
+    });
+  }
+
+  m.querySelector('#wzCopy').addEventListener('click', () => copyText(filled()));
+  m.querySelector('#wzSend').addEventListener('click', () => {
+    const text = filled();
+    const left = (text.match(PLACEHOLDER_RE) || []).length;
+    if (left && !confirm(`נותרו ${left} שדות לא ממולאים — להמשיך בכל זאת?`)) return;
+    const aud = cur.audience;
+    closeModal();
+    switchTab('outgoing');
+    setTimeout(() => {
+      const bodyEl = $('#oBody'), audEl = $('#oAud');
+      if (bodyEl) bodyEl.value = text;
+      if (audEl && aud) audEl.value = aud;
+      toast('ההודעה נטענה לטופס ההפצה');
+    }, 400);
+  });
+  const saveBtn = m.querySelector('#wzSave');
+  if (saveBtn) saveBtn.addEventListener('click', () => cannedForm({
+    title: cur.title + ' — עותק',
+    category: cur.category, audience: cur.audience,
+    body: filled(), notes: cur.notes || '',
+  }));
+  const aiBtn = m.querySelector('#wzAI');
+  if (aiBtn) aiBtn.addEventListener('click', async () => {
+    aiBtn.disabled = true; aiBtn.textContent = '⏳ מנסח...';
+    try {
+      const r = await api('/api/outgoing/draft', {
+        method: 'POST',
+        body: { manual_text: fillTemplate(cur.body, values()), audience: cur.audience || 'ציבור' },
+      });
+      aiBody = r.body;
+      renderPreview();
+    } catch (e) { toast(e.message, true); }
+    aiBtn.disabled = false; aiBtn.textContent = '🤖 שיפור ניסוח';
+  });
+
+  renderFields();
 }
 
 /* ---------------- גלריית חומרי הסברה ---------------- */
