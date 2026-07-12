@@ -906,6 +906,7 @@ def whatsapp_webhook():
     log_history(conn, cur.lastrowid, 'created', 'התקבלה הודעת וואטסאפ', user_id=None)
     conn.commit()
     conn.close()
+    alert_new_question(cur.lastrowid, body or '(מדיה)', profile or phone)
     return _twiml()
 
 
@@ -951,6 +952,26 @@ def send_whatsapp(phone, text):
         raise RuntimeError(f'שירות הוואטסאפ דחה את הבקשה ({e.code}) — בדוק את פרטי החיבור בהגדרות')
     except urllib.error.URLError:
         raise RuntimeError('אין חיבור לשירות הוואטסאפ — נסה שוב')
+
+
+def alert_new_question(qid, content, sender_desc):
+    """שולח התראת וואטסאפ על שאלה חדשה למספרי ההתראות שהוגדרו. כשל בהתראה לא מפיל את הקליטה."""
+    conn = get_db()
+    numbers = (get_setting(conn, 'alert_numbers') or '').replace(' ', '')
+    conn.close()
+    if not numbers or not wa_send_enabled():
+        return
+    msg = (f'🔔 שאלה חדשה בתא ההסברה (#{qid})\n'
+           f'מאת: {sender_desc}\n'
+           f'━━━━━━━━━━\n{content[:300]}\n━━━━━━━━━━\n'
+           f'לטיפול: {os.environ.get("APP_URL", "https://hasbara-cell.onrender.com")}')
+    for num in numbers.split(','):
+        if not num.strip():
+            continue
+        try:
+            send_whatsapp(num.strip(), msg)
+        except RuntimeError:
+            pass
 
 
 @app.route('/api/questions/<int:qid>/send-answer', methods=['POST'])
@@ -1081,6 +1102,7 @@ def greenapi_webhook():
     conn.commit()
     conn.close()
     wa_log(f'✅ נקלטה שאלה #{cur.lastrowid}', f'{src_desc} | {text[:60]}')
+    alert_new_question(cur.lastrowid, text, f'{sender_name}' + (f' ({chat_name})' if is_group else ''))
     return jsonify({'ok': True, 'question_id': cur.lastrowid})
 
 
@@ -2179,6 +2201,7 @@ def settings_status():
     key = get_api_key()
     conn = get_db()
     key_from_db = bool(get_setting(conn, 'anthropic_api_key'))
+    alert_numbers = get_setting(conn, 'alert_numbers') or ''
     conn.close()
     from urllib.parse import quote
     tok_enc = quote(WEBHOOK_TOKEN, safe='') if WEBHOOK_TOKEN else ''
@@ -2194,6 +2217,7 @@ def settings_status():
         if WEBHOOK_TOKEN else None,
         'wa_send_enabled': wa_send_enabled(),
         'greenapi_instance': _greenapi_creds()[0],
+        'alert_numbers': alert_numbers,
         'is_prod': IS_PROD,
     })
 
@@ -2216,6 +2240,22 @@ def set_greenapi():
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'wa_send_enabled': wa_send_enabled()})
+
+
+@app.route('/api/settings/alerts', methods=['POST'])
+@roles_required('admin')
+def set_alerts():
+    """מספרי וואטסאפ להתראה על שאלה חדשה (מופרדים בפסיק). ריק = כיבוי."""
+    numbers = (request.get_json(force=True).get('numbers') or '').strip()
+    conn = get_db()
+    if numbers:
+        set_setting(conn, 'alert_numbers', numbers)
+    else:
+        conn.execute("DELETE FROM settings WHERE key='alert_numbers'")
+    log_action(conn, 'set_alerts', 'settings', None, numbers or 'כובה')
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
 
 
 @app.route('/api/settings/api-key', methods=['POST'])

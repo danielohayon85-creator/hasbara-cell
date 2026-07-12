@@ -101,6 +101,13 @@ async function enterApp() {
   $('#userName').textContent = `${ME.name}`;
   renderTabs();
   switchTab('dashboard');
+  // חיווי שאלות חדשות — בדיקה כל חצי דקה + בקשת הרשאה להתראות דפדפן
+  pollNewQuestions();
+  if (window._qPollTimer) clearInterval(window._qPollTimer);
+  window._qPollTimer = setInterval(pollNewQuestions, 30000);
+  if (window.Notification && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
 }
 
 $('#loginForm').addEventListener('submit', async (e) => {
@@ -147,9 +154,49 @@ const TABS = [
 
 function renderTabs() {
   const nav = $('#tabs');
-  nav.innerHTML = TABS.map(t => `<button data-tab="${t.id}">${t.label}</button>`).join('');
+  nav.innerHTML = TABS.map(t =>
+    `<button data-tab="${t.id}">${t.label}${t.id === 'questions' ? '<span class="badge hidden" id="newQBadge"></span>' : ''}</button>`).join('');
   nav.querySelectorAll('button').forEach(b =>
     b.addEventListener('click', () => switchTab(b.dataset.tab)));
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880; g.gain.value = 0.15;
+    o.start(); o.stop(ctx.currentTime + 0.25);
+    setTimeout(() => ctx.close(), 500);
+  } catch (e) { /* דפדפן חוסם אודיו בלי אינטראקציה — לא קריטי */ }
+}
+
+/* ---- חיווי שאלות חדשות: מונה על הטאב + התראה קופצת ---- */
+let _lastMaxQid = null;
+const BASE_TITLE = document.title;
+
+async function pollNewQuestions() {
+  try {
+    const rows = await api('/api/questions?status=' + encodeURIComponent('חדש'));
+    const badge = $('#newQBadge');
+    if (badge) {
+      badge.textContent = rows.length;
+      badge.classList.toggle('hidden', rows.length === 0);
+    }
+    document.title = rows.length ? `(${rows.length}) ${BASE_TITLE}` : BASE_TITLE;
+    const maxId = rows.length ? Math.max(...rows.map(q => q.id)) : 0;
+    if (_lastMaxQid !== null && maxId > _lastMaxQid) {
+      const newest = rows.find(q => q.id === maxId);
+      toast('🔔 שאלה חדשה נכנסה: ' + (newest ? newest.content.slice(0, 60) : ''));
+      beep();
+      if (window.Notification && Notification.permission === 'granted' && newest) {
+        new Notification('שאלה חדשה — תא הסברה נפת הרטוב', { body: newest.content.slice(0, 100) });
+      }
+      if (currentTab === 'questions') loadQuestions();
+      if (currentTab === 'dashboard') renderDashboard();
+    }
+    _lastMaxQid = Math.max(_lastMaxQid ?? 0, maxId);
+  } catch (e) { /* שקט — ננסה בסבב הבא */ }
 }
 
 function switchTab(id) {
@@ -1379,6 +1426,12 @@ async function loadSysStatus() {
           <button class="btn sm" id="gaSave">שמור חיבור</button>
         </div>
         <span class="muted">מאפשר לשלוח מענה מאושר חזרה לפונה בלחיצה. השאר ריק ושמור — לניתוק.</span></div>
+      <div class="field" style="margin-top:6px"><label>🔔 מספרי וואטסאפ להתראה על שאלה חדשה (מופרדים בפסיק)</label>
+        <div class="row">
+          <input id="alertNumbers" value="${esc(s.alert_numbers || '')}" placeholder="0501234567, 0521112222" style="flex:2">
+          <button class="btn sm" id="alertSave">שמור התראות</button>
+        </div>
+        <span class="muted">כל שאלה שנקלטת אוטומטית מוואטסאפ תישלח כהתראה למספרים אלה. ריק = כבוי. ${s.wa_send_enabled ? '' : '⚠️ דורש חיבור Green API פעיל.'}</span></div>
       <div class="hist-item">📥 Webhook קליטת וואטסאפ: ${s.webhook_configured ? '<b style="color:var(--ok)">מוגדר</b>' : '<b style="color:var(--err)">לא מוגדר</b> — הגדר WHATSAPP_WEBHOOK_TOKEN'}</div>
       ${s.webhook_url ? `<div class="hist-item" style="word-break:break-all"><span class="muted">כתובת ל-Twilio (מספר ייעודי רשמי):</span><br><code style="font-size:12px">${esc(s.webhook_url)}</code>
         <button class="btn sm ghost" id="whCopy">📋</button></div>` : ''}
@@ -1394,6 +1447,12 @@ async function loadSysStatus() {
     if (wc) wc.addEventListener('click', () => copyText(s.webhook_url));
     const gc = $('#gaCopy');
     if (gc) gc.addEventListener('click', () => copyText(s.greenapi_url));
+    $('#alertSave').addEventListener('click', async () => {
+      try {
+        await api('/api/settings/alerts', { method: 'POST', body: { numbers: $('#alertNumbers').value.trim() } });
+        toast($('#alertNumbers').value.trim() ? '🔔 התראות וואטסאפ הופעלו' : 'התראות כובו');
+      } catch (e) { toast(e.message, true); }
+    });
     const loadWaLog = async () => {
       try {
         const rows = await api('/api/settings/wa-log');
