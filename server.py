@@ -1040,6 +1040,115 @@ def _classify_group_message(text):
     return ('?' in text or 'האם' in text or 'מתי' in text or 'איפה' in text), None
 
 
+WA_FILE_TYPES = ('documentMessage', 'imageMessage')
+WA_DOC_EXTS = ('.pdf', '.docx', '.txt')
+WA_IMG_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
+
+
+def _download_wa_file(url, ext):
+    """מוריד קובץ מוואטסאפ (Green API) ל-UPLOAD_DIR. מחזיר (stored_name, size)."""
+    import urllib.request
+    stored = uuid.uuid4().hex + ext
+    path = os.path.join(UPLOAD_DIR, stored)
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        length = int(resp.headers.get('Content-Length') or 0)
+        if length > 20 * 1024 * 1024:
+            raise RuntimeError('קובץ גדול מ-20MB')
+        data = resp.read(20 * 1024 * 1024 + 1)
+        if len(data) > 20 * 1024 * 1024:
+            raise RuntimeError('קובץ גדול מ-20MB')
+    with open(path, 'wb') as fh:
+        fh.write(data)
+    return stored, len(data)
+
+
+def _auto_insights_bg(doc_id):
+    """הפקת תובנות ברקע למסמך שנקלט מוואטסאפ — כשל שקט, אפשר להפיק ידנית אח"כ."""
+    import threading
+
+    def worker():
+        try:
+            run_insights(doc_id)
+        except Exception:
+            pass
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _ingest_wa_file(md, sd, is_group, phone, sender_name, chat_name, wa_log):
+    """קליטת קובץ מוואטסאפ: מסמך → מאגר המסמכים (+תובנות ברקע); תמונה פרטית → שאלה עם צרופה."""
+    fdata = md.get('fileMessageData') or md.get('imageMessageData') or {}
+    url = fdata.get('downloadUrl')
+    fname = fdata.get('fileName') or 'קובץ מוואטסאפ'
+    caption = (fdata.get('caption') or '').strip()
+    src_desc = f'קבוצה: {chat_name}' if is_group else f'פרטי: {sender_name}'
+    if not url:
+        wa_log('התעלמות — קובץ ללא קישור הורדה', src_desc)
+        return jsonify({'ok': True})
+    ext = os.path.splitext(fname)[1].lower()
+    if ext in WA_DOC_EXTS:
+        try:
+            stored, size = _download_wa_file(url, ext)
+        except Exception as e:
+            wa_log('❌ הורדת קובץ נכשלה', f'{src_desc} | {fname} | {e}')
+            return jsonify({'ok': True})
+        text, err = extract_text_from_file(os.path.join(UPLOAD_DIR, stored), ext)
+        conn = get_db()
+        cur = conn.execute(
+            'INSERT INTO documents (title, doc_type, source, orig_name, stored_name, mime, size, '
+            'extracted_text, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+            (caption or os.path.splitext(fname)[0], 'אחר',
+             f'וואטסאפ — {chat_name or sender_name}', fname, stored,
+             fdata.get('mimeType'), size, text, now()))
+        doc_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        auto_ai = ai_enabled() and bool((text or '').strip())
+        wa_log(f'📄 נקלט מסמך #{doc_id} למאגר' + (' — תובנות מופקות ברקע' if auto_ai else ''),
+               f'{src_desc} | {fname}')
+        if auto_ai:
+            _auto_insights_bg(doc_id)
+        # אם צורף כיתוב שנראה כשאלה — נפתחת גם שאלה מקושרת
+        if caption and not is_group:
+            conn = get_db()
+            qcur = conn.execute(
+                'INSERT INTO questions (opened_at, asker_name, asker_phone, source, content, '
+                'urgency, status, internal_notes, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+                (now(), sender_name, phone, 'וואטסאפ', caption, 'רגיל', 'חדש',
+                 f'צורף מסמך שנקלט למאגר (#{doc_id}): {fname}', now()))
+            conn.execute('INSERT INTO question_links (question_id, kind, ref_id, created_at) '
+                         'VALUES (?,?,?,?)', (qcur.lastrowid, 'document', doc_id, now()))
+            log_history(conn, qcur.lastrowid, 'created', 'התקבלה הודעת וואטסאפ עם מסמך', user_id=None)
+            conn.commit()
+            conn.close()
+            alert_new_question(qcur.lastrowid, caption, sender_name)
+        return jsonify({'ok': True, 'document_id': doc_id})
+    if ext in WA_IMG_EXTS and not is_group:
+        # תמונה בפרטי — נפתחת שאלה עם התמונה כקובץ מצורף
+        try:
+            stored, size = _download_wa_file(url, ext)
+        except Exception as e:
+            wa_log('❌ הורדת תמונה נכשלה', f'{src_desc} | {e}')
+            return jsonify({'ok': True})
+        conn = get_db()
+        qcur = conn.execute(
+            'INSERT INTO questions (opened_at, asker_name, asker_phone, source, content, urgency, '
+            'status, updated_at) VALUES (?,?,?,?,?,?,?,?)',
+            (now(), sender_name, phone, 'וואטסאפ', caption or '(צורפה תמונה — ראה קובץ מצורף)',
+             'רגיל', 'חדש', now()))
+        conn.execute('INSERT INTO attachments (question_id, orig_name, stored_name, mime, size, '
+                     'created_at) VALUES (?,?,?,?,?,?)',
+                     (qcur.lastrowid, fname, stored, fdata.get('mimeType'), size, now()))
+        log_history(conn, qcur.lastrowid, 'created', 'התקבלה הודעת וואטסאפ עם תמונה', user_id=None)
+        conn.commit()
+        conn.close()
+        wa_log(f'✅ נקלטה שאלה #{qcur.lastrowid} עם תמונה', f'{src_desc} | {fname}')
+        alert_new_question(qcur.lastrowid, caption or '(תמונה)', sender_name)
+        return jsonify({'ok': True, 'question_id': qcur.lastrowid})
+    wa_log('התעלמות — קובץ מסוג לא נתמך' + (' (תמונה בקבוצה)' if ext in WA_IMG_EXTS else ''),
+           f'{src_desc} | {fname}')
+    return jsonify({'ok': True})
+
+
 @app.route('/api/webhook/greenapi', methods=['POST'])
 def greenapi_webhook():
     """Webhook ל-Green API: קולט הודעות ממספר ייעודי וגם מקבוצות שהבוט חבר בהן.
@@ -1072,6 +1181,9 @@ def greenapi_webhook():
     sender_name = sd.get('senderName') or phone
     chat_name = sd.get('chatName') or ''
     src_desc = f'קבוצה: {chat_name}' if is_group else f'פרטי: {sender_name}'
+    # קבצים: מסמכים נקלטים למאגר, תמונות בפרטי נפתחות כשאלה
+    if md.get('typeMessage') in WA_FILE_TYPES:
+        return _ingest_wa_file(md, sd, is_group, phone, sender_name, chat_name, wa_log)
     if not text:
         wa_log('התעלמות — הודעה בלי טקסט', f'{src_desc} | {md.get("typeMessage") or ""}')
         return jsonify({'ok': True})
@@ -1251,32 +1363,45 @@ def download_document(doc_id):
                      download_name=r['orig_name'], as_attachment=True)
 
 
-@app.route('/api/documents/<int:doc_id>/insights', methods=['POST'])
-def generate_insights(doc_id):
-    if not ai_enabled():
-        return jsonify({'ai': False, 'error': 'מפתח API לא מוגדר — ניתן למלא את השדות ידנית'}), 200
+def run_insights(doc_id):
+    """מפיק תובנות למסמך ושומר. זורק חריגות — הקורא מטפל. מחזיר את התובנות."""
     conn = get_db()
     r = conn.execute('SELECT extracted_text, title FROM documents WHERE id=?', (doc_id,)).fetchone()
     conn.close()   # סוגרים לפני קריאת ה-API — לא מחזיקים נעילה
     if not r:
-        return jsonify({'error': 'מסמך לא נמצא'}), 404
+        raise LookupError('מסמך לא נמצא')
     text = (r['extracted_text'] or '').strip()
     if not text:
-        return jsonify({'error': 'אין טקסט מחולץ במסמך. הדבק טקסט ידנית ונסה שוב.'}), 400
-    try:
-        raw = call_claude(INSIGHTS_SYSTEM,
-                          f'שם המסמך: {r["title"]}\n\nתוכן המסמך:\n{text[:60000]}',
-                          max_tokens=8000, schema=INSIGHTS_SCHEMA)
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return jsonify({'error': 'תשובת ה-AI לא תקינה — נסה שוב'}), 502
-    except Exception as e:
-        return ai_error(e)
+        raise ValueError('אין טקסט מחולץ במסמך. הדבק טקסט ידנית ונסה שוב.')
+    raw = call_claude(INSIGHTS_SYSTEM,
+                      f'שם המסמך: {r["title"]}\n\nתוכן המסמך:\n{text[:60000]}',
+                      max_tokens=8000, schema=INSIGHTS_SCHEMA)
+    data = json.loads(raw)
     conn = get_db()
     conn.execute('UPDATE documents SET ai_summary=?, ai_key_points=?, ai_messages=?, ai_qa=?, '
                  'ai_gaps=?, ai_draft_message=?, insights_generated_at=?, insights_model=? WHERE id=?',
                  (data['summary'], data['key_points'], data['messages'], data['qa'],
                   data['gaps'], data['draft_message'], now(), get_model(), doc_id))
+    conn.commit()
+    conn.close()
+    return data
+
+
+@app.route('/api/documents/<int:doc_id>/insights', methods=['POST'])
+def generate_insights(doc_id):
+    if not ai_enabled():
+        return jsonify({'ai': False, 'error': 'מפתח API לא מוגדר — ניתן למלא את השדות ידנית'}), 200
+    try:
+        data = run_insights(doc_id)
+    except LookupError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except json.JSONDecodeError:
+        return jsonify({'error': 'תשובת ה-AI לא תקינה — נסה שוב'}), 502
+    except Exception as e:
+        return ai_error(e)
+    conn = get_db()
     log_action(conn, 'generate_insights', 'document', doc_id)
     conn.commit()
     conn.close()
