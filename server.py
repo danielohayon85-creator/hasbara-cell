@@ -397,6 +397,15 @@ def api_gate():
     return None
 
 
+def webhook_token_ok():
+    """אימות טוקן ה-webhook. תו '+' בטוקן מפוענח כרווח ב-query string — מקבלים את שתי הצורות."""
+    supplied = request.args.get('token', '')
+    if not WEBHOOK_TOKEN or not supplied:
+        return False
+    return (hmac.compare_digest(supplied, WEBHOOK_TOKEN)
+            or hmac.compare_digest(supplied.replace(' ', '+'), WEBHOOK_TOKEN))
+
+
 # הגבלת קצב פשוטה נגד ניחוש סיסמאות (בזיכרון; מספיק למופע יחיד)
 _login_fails = {}
 LOGIN_MAX = 10
@@ -866,8 +875,7 @@ def paste_whatsapp():
 @app.route('/api/webhook/whatsapp', methods=['POST'])
 def whatsapp_webhook():
     """Webhook תואם Twilio — יוצר שאלה חדשה מכל הודעה נכנסת. מוגן בטוקן."""
-    token = request.args.get('token', '')
-    if not WEBHOOK_TOKEN or not hmac.compare_digest(token, WEBHOOK_TOKEN):
+    if not webhook_token_ok():
         return jsonify({'error': 'forbidden'}), 403
     frm = request.form.get('From', '')
     body = (request.form.get('Body') or '').strip()
@@ -1023,8 +1031,7 @@ def greenapi_webhook():
         conn2.commit()
         conn2.close()
 
-    token = request.args.get('token', '')
-    if not WEBHOOK_TOKEN or not hmac.compare_digest(token, WEBHOOK_TOKEN):
+    if not webhook_token_ok():
         # נרשם ביומן כדי שאפשר יהיה לאבחן כתובת webhook שהודבקה בלי טוקן / עם טוקן שגוי
         wa_log('❌ נדחה — טוקן שגוי או חסר בכתובת ה-webhook',
                'ודא שהכתובת ב-Green API כוללת את ?token=... במלואו')
@@ -2173,15 +2180,17 @@ def settings_status():
     conn = get_db()
     key_from_db = bool(get_setting(conn, 'anthropic_api_key'))
     conn.close()
+    from urllib.parse import quote
+    tok_enc = quote(WEBHOOK_TOKEN, safe='') if WEBHOOK_TOKEN else ''
     return jsonify({
         'ai_enabled': ai_enabled(),
         'key_masked': (key[:12] + '…' + key[-4:]) if key and len(key) > 20 else None,
         'key_source': 'settings' if key_from_db else ('env' if ANTHROPIC_API_KEY else None),
         'model': get_model(),
         'webhook_configured': bool(WEBHOOK_TOKEN),
-        'webhook_url': (request.url_root.rstrip('/') + '/api/webhook/whatsapp?token=' + WEBHOOK_TOKEN)
+        'webhook_url': (request.url_root.rstrip('/') + '/api/webhook/whatsapp?token=' + tok_enc)
         if WEBHOOK_TOKEN else None,
-        'greenapi_url': (request.url_root.rstrip('/') + '/api/webhook/greenapi?token=' + WEBHOOK_TOKEN)
+        'greenapi_url': (request.url_root.rstrip('/') + '/api/webhook/greenapi?token=' + tok_enc)
         if WEBHOOK_TOKEN else None,
         'wa_send_enabled': wa_send_enabled(),
         'greenapi_instance': _greenapi_creds()[0],
