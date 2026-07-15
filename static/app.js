@@ -145,6 +145,7 @@ const TABS = [
   { id: 'messages', label: '📢 מסרים' },
   { id: 'canned', label: '🗂 בנק הודעות' },
   { id: 'gallery', label: '🖼 גלריה' },
+  { id: 'contacts', label: '👥 אנשי קשר' },
   { id: 'activities', label: '📝 פעילות' },
   { id: 'outgoing', label: '📤 הפצה' },
   { id: 'summary', label: '🕐 סיכום משמרת' },
@@ -206,6 +207,7 @@ function switchTab(id) {
   const renderers = {
     dashboard: renderDashboard, questions: renderQuestions, documents: renderDocuments,
     messages: renderMessages, canned: renderCanned, gallery: renderGallery,
+    contacts: renderContacts,
     activities: renderActivities, outgoing: renderOutgoing,
     summary: renderSummary, search: renderSearch, settings: renderSettings,
   };
@@ -1173,6 +1175,99 @@ function uploadMaterialModal() {
   });
 }
 
+/* ---------------- ספר אנשי קשר ---------------- */
+async function renderContacts() {
+  const c = $('#content');
+  c.innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">👥 ספר אנשי קשר — גורמי שטח</h2>
+        ${canWrite() ? '<button class="btn" id="newContact">+ איש קשר</button>' : ''}
+      </div>
+      <p class="muted">איש קשר ששולח שאלה בוואטסאפ מזוהה אוטומטית — השאלה מקבלת את שמו ואת הרשות שלו.
+        שולח חדש שלא בספר נוסף אליו אוטומטית. 📣 = ברשימת התפוצה.</p>
+      <div class="filters">
+        <select id="cFAuth"><option value="">כל הרשויות</option>${options(META.authorities, '', false)}</select>
+        <label style="font-size:13px"><input type="checkbox" id="cFDist"> רשימת תפוצה בלבד</label>
+        <input id="cFQ" placeholder="חיפוש שם / טלפון / תפקיד...">
+        <button class="btn sm" id="cFApply">סנן</button>
+      </div>
+      <div id="contactList"><div class="empty">טוען...</div></div>
+    </div>`;
+  if (canWrite()) $('#newContact').addEventListener('click', () => contactForm());
+  $('#cFApply').addEventListener('click', loadContacts);
+  $('#cFQ').addEventListener('keydown', e => { if (e.key === 'Enter') loadContacts(); });
+  loadContacts();
+}
+
+async function loadContacts() {
+  const params = new URLSearchParams();
+  if ($('#cFAuth') && $('#cFAuth').value) params.set('authority', $('#cFAuth').value);
+  if ($('#cFDist') && $('#cFDist').checked) params.set('distribution', '1');
+  if ($('#cFQ') && $('#cFQ').value.trim()) params.set('q', $('#cFQ').value.trim());
+  const rows = await api('/api/contacts?' + params.toString());
+  const el = $('#contactList');
+  if (!rows.length) { el.innerHTML = '<div class="empty">אין אנשי קשר תואמים</div>'; return; }
+  const distCount = rows.filter(r => r.is_distribution).length;
+  const withPhone = rows.filter(r => r.phone).length;
+  el.innerHTML = `
+    <p class="muted">${rows.length} אנשי קשר · ${withPhone} עם טלפון · ${distCount} ברשימת התפוצה</p>
+    <div class="table-wrap"><table class="list">
+    <tr><th></th><th>שם</th><th>תפקיד</th><th>רשות</th><th>טלפון</th><th>הערות</th><th></th></tr>
+    ${rows.map(ct => `<tr>
+      <td>${ct.is_distribution ? '📣' : ''}</td>
+      <td><b>${esc(ct.name)}</b></td>
+      <td>${esc(ct.role_desc || '')}</td>
+      <td>${esc(ct.authority || '')}</td>
+      <td dir="ltr">${esc(ct.phone || '—')}</td>
+      <td class="muted">${esc((ct.notes || '').slice(0, 40))}</td>
+      <td>${canWrite() ? `<button class="btn sm ghost" data-edit="${ct.id}">✏️</button>` : ''}
+          ${isLead() ? `<button class="btn sm danger" data-del="${ct.id}">✕</button>` : ''}</td>
+    </tr>`).join('')}
+  </table></div>`;
+  el.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () =>
+    contactForm(rows.find(x => x.id === +b.dataset.edit))));
+  el.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('להסיר את איש הקשר מהספר?')) return;
+    try { await api('/api/contacts/' + b.dataset.del, { method: 'DELETE' }); toast('הוסר'); loadContacts(); }
+    catch (e) { toast(e.message, true); }
+  }));
+}
+
+function contactForm(ct = null) {
+  const isEdit = !!ct;
+  const m = modal(`
+    <h2>${isEdit ? 'עריכת איש קשר' : 'איש קשר חדש'}</h2>
+    <div class="row">
+      <div class="field"><label>שם *</label><input id="ctName" value="${esc(ct ? ct.name : '')}"></div>
+      <div class="field"><label>טלפון (05X-XXXXXXX)</label><input id="ctPhone" dir="ltr" value="${esc(ct ? ct.phone || '' : '')}"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>תפקיד</label><input id="ctRole" value="${esc(ct ? ct.role_desc || '' : '')}" placeholder='יקל"ר / הסברה / קמב"ץ...'></div>
+      <div class="field"><label>רשות</label><select id="ctAuth">${options(META.authorities, ct ? ct.authority : '')}</select></div>
+    </div>
+    <div class="field"><label><input type="checkbox" id="ctDist" ${ct && ct.is_distribution ? 'checked' : ''}> 📣 ברשימת התפוצה (יקבל הודעות שמופצות בוואטסאפ)</label></div>
+    <div class="field"><label>הערות</label><input id="ctNotes" value="${esc(ct ? ct.notes || '' : '')}"></div>
+    <div class="btn-row"><button class="btn" id="ctSave">שמור</button>
+    <button class="btn ghost" onclick="closeModal()">ביטול</button></div>`);
+  m.querySelector('#ctSave').addEventListener('click', async () => {
+    const body = {
+      name: m.querySelector('#ctName').value.trim(),
+      phone: m.querySelector('#ctPhone').value.trim(),
+      role_desc: m.querySelector('#ctRole').value.trim(),
+      authority: m.querySelector('#ctAuth').value,
+      is_distribution: m.querySelector('#ctDist').checked,
+      notes: m.querySelector('#ctNotes').value.trim(),
+    };
+    if (!body.name) { toast('שם חובה', true); return; }
+    try {
+      if (isEdit) await api('/api/contacts/' + ct.id, { method: 'PUT', body });
+      else await api('/api/contacts', { method: 'POST', body });
+      closeModal(); toast('נשמר'); loadContacts();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 /* ---------------- פעילות ---------------- */
 async function renderActivities() {
   const c = $('#content');
@@ -1364,7 +1459,8 @@ async function loadOutgoing() {
         <button class="btn sm ghost" data-copy="${o.id}">📋 העתק</button>
         ${canWrite() && o.status !== 'הופץ' ? `
           ${isLead() && o.needs_approval && o.status === 'טיוטה' ? `<button class="btn sm" data-appr="${o.id}">✅ אשר</button>` : ''}
-          <button class="btn sm" style="background:var(--ok)" data-dist="${o.id}">📤 סמן כהופץ</button>` : ''}
+          <button class="btn sm" style="background:var(--ok)" data-dist="${o.id}">📤 סמן כהופץ</button>
+          ${META.wa_send_enabled ? `<button class="btn sm" style="background:#25D366" data-distlist="${o.id}">📣 שלח לרשימת התפוצה</button>` : ''}` : ''}
         ${o.distributed_at ? `<span class="muted">הופץ: ${fmtDT(o.distributed_at)}</span>` : ''}
       </div>
     </div>`).join('');
@@ -1377,6 +1473,15 @@ async function loadOutgoing() {
   el.querySelectorAll('[data-dist]').forEach(b => b.addEventListener('click', async () => {
     try { await api(`/api/outgoing/${b.dataset.dist}/distribute`, { method: 'POST' }); toast('סומן כהופץ ותועד בפעילות'); loadOutgoing(); }
     catch (e) { toast(e.message, true); }
+  }));
+  el.querySelectorAll('[data-distlist]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('לשלוח את ההודעה בוואטסאפ לכל אנשי הקשר שברשימת התפוצה?')) return;
+    b.disabled = true;
+    try {
+      const r = await api(`/api/outgoing/${b.dataset.distlist}/send-distribution`, { method: 'POST' });
+      toast(`📣 נשלח ל-${r.sent} נמענים` + (r.failed.length ? ` (נכשל: ${r.failed.join(', ')})` : ''));
+      loadOutgoing();
+    } catch (e) { toast(e.message, true); b.disabled = false; }
   }));
 }
 

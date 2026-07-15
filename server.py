@@ -363,6 +363,19 @@ def init_db():
             uploaded_by_id INTEGER,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT,
+            role_desc TEXT,
+            authority TEXT,
+            is_distribution INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -409,6 +422,50 @@ def init_db():
         if title not in existing_titles:
             c.execute('INSERT INTO canned_messages (title, category, body, audience, active, created_at) '
                       'VALUES (?,?,?,?,1,?)', (title, cat, body, aud, now()))
+    # רשויות הנפה — הזרקה לפי שם (לא דורס, לא מחזיר מה שנמחק)
+    existing_auth = {r['name'] for r in c.execute('SELECT name FROM authorities')}
+    for i, a in enumerate(['בית שמש', 'מטה יהודה', 'מבשרת ציון', 'אבו גוש',
+                           'קריית יערים', 'צור הדסה', 'הר אדר']):
+        if a not in existing_auth:
+            c.execute('INSERT OR IGNORE INTO authorities (name, active, sort_order) VALUES (?,1,?)', (a, i))
+
+    # ספר אנשי קשר ראשוני — גורמי שטח מקבוצות הוואטסאפ (בלי מפקדה ותא הסברה).
+    # טלפונים מתמלאים אוטומטית כשאיש קשר שולח שאלה, או ידנית מהמסך.
+    if c.execute('SELECT COUNT(*) FROM contacts').fetchone()[0] == 0:
+        seed_contacts = [
+            # בית שמש
+            ('אורי', 'יקל"ר', 'בית שמש'), ('אלי', 'יקל"ר', 'בית שמש'),
+            ('אשל', 'יקל"ר', 'בית שמש'), ('נדב', 'קמב"ץ', 'בית שמש'),
+            ('מעיין בנשטיין', 'יקל"ר', 'בית שמש'), ('רום', 'יקל"ר', 'בית שמש'),
+            ('נעמה', 'יקל"ר', 'בית שמש'), ('איתן', 'הסברה', 'בית שמש'),
+            ('חמ"ל יקל"ר בית שמש', 'חמ"ל', 'בית שמש'),
+            # מטה יהודה
+            ('אסף', 'יקל"ר', 'מטה יהודה'), ('אביחי', 'יקל"ר', 'מטה יהודה'),
+            ('בני סבתני', 'יקל"ר', 'מטה יהודה'), ('חמד סלמה', 'יקל"ר', 'מטה יהודה'),
+            ('אורן ברמי', 'יקל"ר', 'מטה יהודה'), ('אורי', 'יקל"ר', 'מטה יהודה'),
+            ('שי הוד', 'מש"ק התנהגות אוכלוסיה', 'מטה יהודה'),
+            ('עודד', 'קצין הסברה', 'מטה יהודה'), ('עידן חמי', 'הסברה', 'מטה יהודה'),
+            ('חמ"ל יקל"ר מטה יהודה', 'חמ"ל', 'מטה יהודה'),
+            # מבשרת ציון
+            ('דודי כהן', 'מפקד יקל"ר', 'מבשרת ציון'), ('שגיא ס', 'מפקד יקל"ר', 'מבשרת ציון'),
+            ('דניאל זוהר', 'יקל"ר', 'מבשרת ציון'), ('איתמר אוחיון', 'קמב"ץ', 'מבשרת ציון'),
+            ('יעל', 'קה"א', 'מבשרת ציון'), ('ערן מילנר', 'הסברה', 'מבשרת ציון'),
+            ('חמ"ל יקל"ר מבשרת', 'חמ"ל', 'מבשרת ציון'),
+            # אבו גוש
+            ('אבי', 'מפקד יקל"ר', 'אבו גוש'), ('אסף בן ישעיהו', 'יקל"ר', 'אבו גוש'),
+            # קריית יערים
+            ('דחבש', 'יקל"ר', 'קריית יערים'), ('עומרי', 'סגן מפקד יקל"ר', 'קריית יערים'),
+            ('לירון', 'יקל"ר', 'קריית יערים'), ('יהודה בלעדי', 'סמב"ץ', 'קריית יערים'),
+            ('אלי', 'קה"א התנהגות', 'קריית יערים'),
+            # צור הדסה
+            ('שילה כץ', 'יקל"ר', 'צור הדסה'),
+            # הר אדר
+            ('אמיר', 'הסברה', 'הר אדר'), ('חיים', 'סגן מפקד יקל"ר', 'הר אדר'),
+            ('דפנה רביץ', 'הסברה', 'הר אדר'), ('אמיר אבניאל', 'יקל"ר', 'הר אדר'),
+        ]
+        for name, role, auth in seed_contacts:
+            c.execute('INSERT INTO contacts (name, role_desc, authority, is_distribution, '
+                      'active, created_at) VALUES (?,?,?,0,1,?)', (name, role, auth, now()))
     conn.commit()
     conn.close()
 
@@ -979,10 +1036,11 @@ def whatsapp_webhook():
             media_urls.append(u)
     notes = ('קבצים מצורפים (וואטסאפ):\n' + '\n'.join(media_urls)) if media_urls else None
     raw = json.dumps({k: v for k, v in request.form.items()}, ensure_ascii=False)
+    disp_name, contact_auth = contact_for_incoming(conn, phone, profile or phone)
     cur = conn.execute(
-        'INSERT INTO questions (opened_at, asker_name, asker_phone, source, content, urgency, '
-        'status, internal_notes, raw_source_text, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        (now(), profile or phone, phone, 'וואטסאפ', body or '(הודעת מדיה ללא טקסט)',
+        'INSERT INTO questions (opened_at, asker_name, asker_phone, source, authority, content, '
+        'urgency, status, internal_notes, raw_source_text, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        (now(), disp_name, phone, 'וואטסאפ', contact_auth, body or '(הודעת מדיה ללא טקסט)',
          'רגיל', 'חדש', notes, raw, now()))
     log_history(conn, cur.lastrowid, 'created', 'התקבלה הודעת וואטסאפ', user_id=None)
     conn.commit()
@@ -996,6 +1054,21 @@ def whatsapp_webhook():
 def _twiml():
     return Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
                     mimetype='application/xml')
+
+
+def contact_for_incoming(conn, phone, fallback_name):
+    """שיוך שאלה נכנסת לאיש קשר: מחזיר (שם תצוגה, רשות).
+    איש קשר חדש נוצר אוטומטית; קיים — משתמשים בשם וברשות שנשמרו בספר."""
+    if not phone:
+        return fallback_name, None
+    row = conn.execute('SELECT id, name, authority FROM contacts WHERE phone=? AND active=1',
+                       (phone,)).fetchone()
+    if row:
+        return (row['name'] or fallback_name), row['authority']
+    conn.execute('INSERT INTO contacts (name, phone, notes, is_distribution, active, created_at) '
+                 "VALUES (?,?,?,0,1,?)",
+                 (fallback_name or phone, phone, 'נוצר אוטומטית משאלה נכנסת בוואטסאפ', now()))
+    return fallback_name, None
 
 
 # ---- שליחת וואטסאפ יוצא דרך Green API (מענה חוזר לפונה) ----
@@ -1286,11 +1359,12 @@ def greenapi_webhook():
         wa_log('התעלמות — כפילות', f'{src_desc} | שאלה #{dup["id"]}')
         return jsonify({'ok': True, 'skipped': 'duplicate'})
     notes = f'נקלט מקבוצת וואטסאפ: {chat_name}' if is_group else None
+    disp_name, contact_auth = contact_for_incoming(conn, phone, sender_name)
     cur = conn.execute(
-        'INSERT INTO questions (opened_at, asker_name, asker_phone, source, content, topic, '
-        'urgency, status, internal_notes, raw_source_text, updated_at) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        (now(), sender_name, phone, 'וואטסאפ', text, topic, 'רגיל', 'חדש', notes,
+        'INSERT INTO questions (opened_at, asker_name, asker_phone, source, authority, content, '
+        'topic, urgency, status, internal_notes, raw_source_text, updated_at) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        (now(), disp_name, phone, 'וואטסאפ', contact_auth, text, topic, 'רגיל', 'חדש', notes,
          json.dumps(d, ensure_ascii=False)[:4000], now()))
     log_history(conn, cur.lastrowid, 'created',
                 'התקבלה הודעת וואטסאפ' + (f' (קבוצה: {chat_name})' if is_group else ''),
@@ -1947,6 +2021,129 @@ def distribute_outgoing(oid):
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'activity_id': cur.lastrowid})
+
+
+# ---------------------------------------------------------------- ספר אנשי קשר
+@app.route('/api/contacts')
+def list_contacts():
+    conn = get_db()
+    where, params = ['active=1'], []
+    if request.args.get('authority'):
+        where.append('authority=?')
+        params.append(request.args['authority'])
+    if request.args.get('distribution') == '1':
+        where.append('is_distribution=1')
+    q = (request.args.get('q') or '').strip()
+    if q:
+        where.append('(name LIKE ? OR phone LIKE ? OR role_desc LIKE ?)')
+        params.extend([f'%{q}%'] * 3)
+    rows = [dict(r) for r in conn.execute(
+        'SELECT * FROM contacts WHERE ' + ' AND '.join(where) +
+        ' ORDER BY authority, name LIMIT 500', params)]
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route('/api/contacts', methods=['POST'])
+def create_contact():
+    d = request.get_json(force=True)
+    if not (d.get('name') or '').strip():
+        return jsonify({'error': 'שם חובה'}), 400
+    phone = normalize_phone((d.get('phone') or '').strip()) or None
+    conn = get_db()
+    if phone:
+        dup = conn.execute('SELECT id FROM contacts WHERE phone=? AND active=1', (phone,)).fetchone()
+        if dup:
+            conn.close()
+            return jsonify({'error': 'כבר קיים איש קשר עם הטלפון הזה'}), 400
+    cur = conn.execute(
+        'INSERT INTO contacts (name, phone, role_desc, authority, is_distribution, notes, '
+        'active, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?)',
+        (d['name'].strip(), phone, d.get('role_desc'), d.get('authority'),
+         1 if d.get('is_distribution') else 0, d.get('notes'), now(), now()))
+    log_action(conn, 'create_contact', 'contact', cur.lastrowid)
+    conn.commit()
+    conn.close()
+    return jsonify({'id': cur.lastrowid})
+
+
+@app.route('/api/contacts/<int:cid>', methods=['PUT'])
+def update_contact(cid):
+    d = request.get_json(force=True)
+    sets, params = [], []
+    for f in ('name', 'role_desc', 'authority', 'notes'):
+        if f in d:
+            sets.append(f'{f}=?')
+            params.append(d[f])
+    if 'phone' in d:
+        sets.append('phone=?')
+        params.append(normalize_phone((d['phone'] or '').strip()) or None)
+    if 'is_distribution' in d:
+        sets.append('is_distribution=?')
+        params.append(1 if d['is_distribution'] else 0)
+    if sets:
+        sets.append('updated_at=?')
+        params.append(now())
+        params.append(cid)
+        conn = get_db()
+        conn.execute(f'UPDATE contacts SET {", ".join(sets)} WHERE id=?', params)
+        log_action(conn, 'update_contact', 'contact', cid)
+        conn.commit()
+        conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/contacts/<int:cid>', methods=['DELETE'])
+@roles_required('admin', 'lead')
+def delete_contact(cid):
+    conn = get_db()
+    conn.execute('UPDATE contacts SET active=0, updated_at=? WHERE id=?', (now(), cid))
+    log_action(conn, 'delete_contact', 'contact', cid)
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/outgoing/<int:oid>/send-distribution', methods=['POST'])
+def send_distribution(oid):
+    """שולח הודעה מאושרת בוואטסאפ לכל אנשי הקשר שברשימת התפוצה, ומתעד כפעילות."""
+    if not wa_send_enabled():
+        return jsonify({'error': 'חיבור וואטסאפ לשליחה לא מוגדר (מסך הגדרות)'}), 400
+    conn = get_db()
+    o = conn.execute('SELECT * FROM outgoing_messages WHERE id=?', (oid,)).fetchone()
+    if not o:
+        conn.close()
+        return jsonify({'error': 'הודעה לא נמצאה'}), 404
+    if o['needs_approval'] and o['status'] == 'טיוטה' and session.get('role') not in ('admin', 'lead'):
+        conn.close()
+        return jsonify({'error': 'ההודעה דורשת אישור לפני הפצה'}), 403
+    recipients = conn.execute(
+        "SELECT id, name, phone FROM contacts WHERE is_distribution=1 AND active=1 "
+        "AND phone IS NOT NULL AND phone != ''").fetchall()
+    conn.close()
+    if not recipients:
+        return jsonify({'error': 'אין אנשי קשר ברשימת התפוצה עם מספר טלפון. '
+                                 'סמן אנשי קשר כ"רשימת תפוצה" והזן להם טלפון במסך אנשי הקשר.'}), 400
+    sent, failed = [], []
+    for r in recipients:
+        try:
+            send_whatsapp(r['phone'], o['body'])
+            sent.append(r['name'])
+        except RuntimeError:
+            failed.append(r['name'])
+    conn = get_db()
+    cur = conn.execute(
+        'INSERT INTO activities (activity_type, description, audience, status, performed_at, '
+        'performed_by_id, created_at) VALUES (?,?,?,?,?,?,?)',
+        ('הודעה שהופצה', o['body'], f'רשימת תפוצה ({len(sent)} נמענים)', 'הופץ',
+         now(), session['uid'], now()))
+    conn.execute('UPDATE outgoing_messages SET status=?, distributed_at=?, activity_id=? WHERE id=?',
+                 ('הופץ', now(), cur.lastrowid, oid))
+    log_action(conn, 'send_distribution', 'outgoing', oid,
+               f'נשלח ל-{len(sent)}, נכשל: {len(failed)}')
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'sent': len(sent), 'failed': failed})
 
 
 # ---------------------------------------------------------------- בנק הודעות מוכנות
