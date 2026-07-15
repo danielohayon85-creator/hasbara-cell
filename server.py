@@ -1852,13 +1852,18 @@ def list_outgoing():
 def draft_outgoing():
     """מחזיר טיוטת הודעה — עם AI אם מוגדר, אחרת טקסט המקור."""
     d = request.get_json(force=True)
-    conn = get_db()
-    src = _outgoing_source_text(conn, d.get('source_type'), d.get('source_id'))
-    conn.close()
+    src_type = d.get('source_type')
     manual = (d.get('manual_text') or '').strip()
+    if src_type == 'manual' and not manual:
+        return jsonify({'error': 'הזן טקסט מקור בתיבה "טקסט מקור (ידני)" ואז לחץ נסח'}), 400
+    if src_type != 'manual' and not d.get('source_id'):
+        return jsonify({'error': 'בחר פריט מהרשימה (אם הרשימה ריקה — אין עדיין פריטים מסוג זה, בחר מקור אחר)'}), 400
+    conn = get_db()
+    src = _outgoing_source_text(conn, src_type, d.get('source_id'))
+    conn.close()
     base = src or manual
     if not base:
-        return jsonify({'error': 'אין מקור מידע להודעה'}), 400
+        return jsonify({'error': 'לפריט המקור שנבחר אין תוכן טקסט — בחר פריט אחר'}), 400
     audience = d.get('audience') or 'ציבור'
     if not ai_enabled():
         return jsonify({'body': base, 'ai': False})

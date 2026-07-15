@@ -1285,15 +1285,21 @@ async function renderOutgoing() {
       const t = $('#oSrcType').value;
       $('#oManualWrap').style.display = t === 'manual' ? '' : 'none';
       $('#oSrcIdWrap').style.display = t === 'manual' ? 'none' : '';
+      let items = [];
       if (t === 'question') {
         const qs = await api('/api/questions?open=');
-        $('#oSrcId').innerHTML = options(qs.map(q => ({ id: q.id, name: `#${q.id} ${q.content.slice(0, 60)}` })), '');
+        items = qs.map(q => ({ id: q.id, name: `#${q.id} ${q.content.slice(0, 60)}` }));
       } else if (t === 'document') {
         const ds = await api('/api/documents');
-        $('#oSrcId').innerHTML = options(ds.map(d => ({ id: d.id, name: d.title })), '');
+        items = ds.map(d => ({ id: d.id, name: d.title }));
       } else if (t === 'message') {
         const ms = await api('/api/messages');
-        $('#oSrcId').innerHTML = options(ms.map(x => ({ id: x.id, name: x.title })), '');
+        items = ms.map(x => ({ id: x.id, name: x.title }));
+      }
+      if (t !== 'manual') {
+        $('#oSrcId').innerHTML = items.length
+          ? options(items, '')
+          : '<option value="">— אין פריטים מסוג זה במערכת —</option>';
       }
     });
     $('#oDraft').addEventListener('click', async () => {
