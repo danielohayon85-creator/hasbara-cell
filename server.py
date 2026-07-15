@@ -2672,6 +2672,26 @@ def audit():
     return jsonify(rows)
 
 
+# ---------------------------------------------------------------- error handler
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """שגיאות לא צפויות נרשמות ליומן הביקורת (נראה ב-/api/audit) ומוחזרות כ-JSON."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    import traceback as _tb
+    err = ''.join(_tb.format_exception(type(e), e, e.__traceback__))[-1500:]
+    try:
+        conn = get_db()
+        conn.execute('INSERT INTO audit_log (user_id, action, entity, entity_id, detail, created_at) '
+                     'VALUES (?,?,?,?,?,?)', (None, 'server_error', request.path, None, err, now()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    return jsonify({'error': 'שגיאת שרת פנימית — נרשמה ביומן'}), 500
+
+
 # ---------------------------------------------------------------- static
 @app.route('/')
 def index():
