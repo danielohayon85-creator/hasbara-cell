@@ -1441,12 +1441,15 @@ def upload_document():
     path = os.path.join(UPLOAD_DIR, stored)
     f.save(path)
     text, err = extract_text_from_file(path, ext)
+    # תאריך פרסום מקורי (אופציונלי) — לקליטת ידע ארגוני היסטורי לפי מועד הפרסום
+    published = (request.form.get('published_at') or '').strip()
+    created = published + 'T00:00:00' if re.fullmatch(r'\d{4}-\d{2}-\d{2}', published) else (published or now())
     conn = get_db()
     cur = conn.execute(
         'INSERT INTO documents (title, doc_type, source, orig_name, stored_name, mime, size, '
         'extracted_text, uploaded_by_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
         (title or f.filename, request.form.get('doc_type'), request.form.get('source'),
-         f.filename, stored, f.mimetype, os.path.getsize(path), text, session['uid'], now()))
+         f.filename, stored, f.mimetype, os.path.getsize(path), text, session['uid'], created))
     doc_id = cur.lastrowid
     log_action(conn, 'upload_document', 'document', doc_id, f.filename)
     conn.commit()
@@ -2245,13 +2248,15 @@ def upload_material():
     stored = uuid.uuid4().hex + ext
     path = os.path.join(UPLOAD_DIR, stored)
     f.save(path)
+    published = (request.form.get('published_at') or '').strip()
+    created = published + 'T00:00:00' if re.fullmatch(r'\d{4}-\d{2}-\d{2}', published) else (published or now())
     conn = get_db()
     cur = conn.execute(
         'INSERT INTO materials (title, category, description, orig_name, stored_name, mime, '
         'size, uploaded_by_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
         ((request.form.get('title') or f.filename).strip(), request.form.get('category'),
          request.form.get('description'), f.filename, stored, f.mimetype,
-         os.path.getsize(path), session['uid'], now()))
+         os.path.getsize(path), session['uid'], created))
     log_action(conn, 'upload_material', 'material', cur.lastrowid, f.filename)
     conn.commit()
     conn.close()
