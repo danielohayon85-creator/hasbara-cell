@@ -1567,7 +1567,7 @@ async function loadListMgr(resource, listSel, inputSel, btnSel) {
   });
 }
 
-const ROLE_LABELS = { admin: 'מנהל מערכת', lead: 'אחראי תא הסברה', user: 'משתמש רגיל', viewer: 'צפייה בלבד' };
+const ROLE_LABELS = { admin: 'מנהל מערכת', lead: 'מש"ק הסברה', user: 'משתמש רגיל', viewer: 'צפייה בלבד' };
 
 async function loadUsers() {
   const rows = await api('/api/users');
