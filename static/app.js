@@ -1639,7 +1639,10 @@ async function renderSettings() {
   if (isAdmin()) {
     html += `
       <div class="card"><h2>משתמשים והרשאות</h2><div id="userList"></div>
-        <button class="btn sm" id="addUser" style="margin-top:8px">+ משתמש חדש</button></div>
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn sm" id="addUser">+ משתמש חדש</button>
+          <button class="btn sm amber" id="rotatePw">🔑 הגרל וייצא סיסמאות חדשות</button>
+        </div></div>
       <div class="card"><h2>מצב מערכת</h2><div id="sysStatus"><div class="empty">טוען...</div></div></div>`;
   }
   html += '</div>';
@@ -1697,6 +1700,33 @@ async function loadUsers() {
   const newBtn = addBtn.cloneNode(true);
   addBtn.replaceWith(newBtn);
   newBtn.addEventListener('click', () => userForm());
+
+  const rotBtn = $('#rotatePw');
+  if (rotBtn) {
+    const newRot = rotBtn.cloneNode(true);
+    rotBtn.replaceWith(newRot);
+    newRot.addEventListener('click', async () => {
+      if (!confirm('להגריל סיסמאות חדשות לכל המשתמשים (מלבדך)?\n\nהסיסמאות הנוכחיות שלהם יפסיקו לעבוד, והחדשות יוצגו פעם אחת בלבד — לחלוקה מיידית.')) return;
+      try {
+        const r = await api('/api/users/rotate-passwords', { method: 'POST', body: {} });
+        if (!r.users.length) { toast('אין משתמשים נוספים לאיפוס', true); return; }
+        const lines = r.users.map(u => `${u.name} (${u.role})\nשם משתמש: ${u.username} | סיסמה: ${u.password}`).join('\n\n');
+        const m = modal(`
+          <h2>🔑 סיסמאות חדשות — מוצג פעם אחת בלבד!</h2>
+          <p class="muted">העתק ושמור עכשיו. אחרי סגירת החלון אין דרך לשחזר — רק להגריל שוב.</p>
+          <div class="table-wrap"><table class="list">
+            <tr><th>שם</th><th>תפקיד</th><th>שם משתמש</th><th>סיסמה</th></tr>
+            ${r.users.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.role)}</td>
+              <td dir="ltr">${esc(u.username)}</td><td dir="ltr"><code>${esc(u.password)}</code></td></tr>`).join('')}
+          </table></div>
+          <div class="btn-row">
+            <button class="btn" id="pwCopyAll">📋 העתק הכל</button>
+            <button class="btn ghost" onclick="closeModal()">סגור</button>
+          </div>`, true);
+        m.querySelector('#pwCopyAll').addEventListener('click', () => copyText(lines));
+      } catch (e) { toast(e.message, true); }
+    });
+  }
 }
 
 function userForm(u = null) {

@@ -2725,6 +2725,33 @@ def update_user(uid):
     return jsonify({'ok': True})
 
 
+@app.route('/api/users/rotate-passwords', methods=['POST'])
+@roles_required('admin')
+def rotate_passwords():
+    """מגריל סיסמאות חדשות למשתמשים ומחזיר אותן פעם אחת — לחלוקה לצוות.
+    הסיסמאות הקיימות אינן ניתנות לשחזור (נשמרות כ-hash בלבד)."""
+    d = request.get_json(force=True)
+    only_ids = d.get('ids')  # אופציונלי: רק משתמשים מסוימים
+    include_self = bool(d.get('include_self'))
+    conn = get_db()
+    users = conn.execute('SELECT id, name, username, role FROM users WHERE active=1 ORDER BY id').fetchall()
+    out = []
+    for u in users:
+        if only_ids and u['id'] not in only_ids:
+            continue
+        if u['id'] == session['uid'] and not include_self:
+            continue  # לא מאפסים את המנהל שמבצע — שלא יינעל בטעות
+        pw = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
+        conn.execute('UPDATE users SET password_hash=? WHERE id=?',
+                     (generate_password_hash(pw), u['id']))
+        out.append({'name': u['name'], 'username': u['username'],
+                    'role': ROLE_NAMES.get(u['role'], u['role']), 'password': pw})
+    log_action(conn, 'rotate_passwords', 'user', None, f'הוגרלו סיסמאות ל-{len(out)} משתמשים')
+    conn.commit()
+    conn.close()
+    return jsonify({'users': out})
+
+
 def _list_table(table):
     conn = get_db()
     rows = [dict(r) for r in conn.execute(
