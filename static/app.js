@@ -1153,7 +1153,7 @@ function uploadMaterialModal() {
     <h2>העלאת חומר הסברה</h2>
     <div class="field"><label>קובץ * (תמונה / PDF / וידאו / מצגת / מסמך, עד 20MB)</label>
       <input type="file" id="mtFile" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.mp4,.pptx,.docx,.xlsx"></div>
-    <div class="field"><label>שם החומר</label><input id="mtTitle" placeholder="ברירת מחדל: שם הקובץ"></div>
+    <div class="field"><label>שם החומר</label><input id="mtTitle" placeholder="${META.ai_enabled ? '🤖 השאר ריק — הכותרת תזוהה אוטומטית מתוכן התמונה' : 'ברירת מחדל: שם הקובץ'}"></div>
     <div class="row">
       <div class="field"><label>קטגוריה</label><select id="mtCat">${options(META.material_categories, '')}</select></div>
     </div>
@@ -1169,8 +1169,10 @@ function uploadMaterialModal() {
     fd.append('category', m.querySelector('#mtCat').value);
     fd.append('description', m.querySelector('#mtDesc').value.trim());
     try {
-      await api('/api/materials', { method: 'POST', body: fd });
-      closeModal(); toast('החומר הועלה לגלריה'); loadGallery();
+      const r = await api('/api/materials', { method: 'POST', body: fd });
+      closeModal();
+      toast(r.ai_titled ? `🤖 הועלה וזוהה: "${r.title}"` : 'החומר הועלה לגלריה');
+      loadGallery();
     } catch (e) { toast(e.message, true); }
   });
 }

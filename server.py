@@ -2216,6 +2216,47 @@ def delete_canned(cid):
 
 
 # ---------------------------------------------------------------- גלריית חומרי הסברה
+VISION_TITLE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'title': {'type': 'string', 'description': 'כותרת קצרה וממוקדת (3-6 מילים) של המסר המרכזי'},
+        'category': {'type': 'string', 'description': 'קטגוריה מתאימה מהרשימה'},
+        'description': {'type': 'string', 'description': 'תיאור בשורה אחת: מה בתמונה ולמי מיועד'},
+    },
+    'required': ['title', 'category', 'description'],
+    'additionalProperties': False,
+}
+
+IMG_MEDIA_TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                   '.gif': 'image/gif', '.webp': 'image/webp'}
+
+
+def vision_catalog_material(path, ext):
+    """מזהה בעזרת Claude את תוכן התמונה: כותרת, קטגוריה ותיאור. זורק חריגה בכישלון."""
+    import base64
+    import anthropic
+    with open(path, 'rb') as fh:
+        data = fh.read()
+    if len(data) > 4 * 1024 * 1024:
+        raise RuntimeError('תמונה גדולה מדי לזיהוי אוטומטי')
+    client = anthropic.Anthropic(api_key=get_api_key())
+    msg = client.messages.create(
+        model=get_model(), max_tokens=400,
+        system=('אתה מקטלג חומרי הסברה של פיקוד העורף בעברית. תן לתמונה כותרת קצרה '
+                '(3-6 מילים) שמתארת את המסר המרכזי שלה — למשל "אמצעי התרעה משלימים" '
+                'או "לא יוצאים עד הנחיה חדשה". בחר קטגוריה מהרשימה: '
+                + ', '.join(MATERIAL_CATEGORIES) + '. החזר JSON בלבד.'),
+        messages=[{'role': 'user', 'content': [
+            {'type': 'image', 'source': {'type': 'base64',
+                                         'media_type': IMG_MEDIA_TYPES[ext], 'data':
+                                         base64.standard_b64encode(data).decode()}},
+            {'type': 'text', 'text': 'קטלג את חומר ההסברה הזה.'},
+        ]}],
+        output_config={'format': {'type': 'json_schema', 'schema': VISION_TITLE_SCHEMA},
+                       'effort': 'low'})
+    return json.loads(next(b.text for b in msg.content if b.type == 'text'))
+
+
 @app.route('/api/materials')
 def list_materials():
     conn = get_db()
@@ -2250,17 +2291,34 @@ def upload_material():
     f.save(path)
     published = (request.form.get('published_at') or '').strip()
     created = published + 'T00:00:00' if re.fullmatch(r'\d{4}-\d{2}-\d{2}', published) else (published or now())
+    title = (request.form.get('title') or '').strip()
+    category = request.form.get('category') or None
+    description = request.form.get('description') or None
+    ai_titled = False
+    # אין כותרת + זו תמונה + יש AI → זיהוי תוכן אוטומטי (כשל → שם הקובץ)
+    if not title and ext in IMG_MEDIA_TYPES and ai_enabled():
+        try:
+            cat_data = vision_catalog_material(path, ext)
+            title = (cat_data.get('title') or '').strip()
+            if not category and cat_data.get('category') in MATERIAL_CATEGORIES:
+                category = cat_data['category']
+            if not description:
+                description = (cat_data.get('description') or '').strip() or None
+            ai_titled = bool(title)
+        except Exception:
+            pass
+    if not title:
+        title = f.filename
     conn = get_db()
     cur = conn.execute(
         'INSERT INTO materials (title, category, description, orig_name, stored_name, mime, '
         'size, uploaded_by_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-        ((request.form.get('title') or f.filename).strip(), request.form.get('category'),
-         request.form.get('description'), f.filename, stored, f.mimetype,
+        (title, category, description, f.filename, stored, f.mimetype,
          os.path.getsize(path), session['uid'], created))
     log_action(conn, 'upload_material', 'material', cur.lastrowid, f.filename)
     conn.commit()
     conn.close()
-    return jsonify({'id': cur.lastrowid})
+    return jsonify({'id': cur.lastrowid, 'title': title, 'ai_titled': ai_titled})
 
 
 @app.route('/api/materials/<int:mid>/file')
