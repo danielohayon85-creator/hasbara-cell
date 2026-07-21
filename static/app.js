@@ -1125,10 +1125,12 @@ async function loadGallery() {
   const icon = (m) => m.is_image ? '' :
     (m.mime || '').includes('pdf') ? '📄' : (m.mime || '').includes('video') ? '🎬' :
     (m.orig_name || '').endsWith('.pptx') ? '📊' : '📁';
+  const imageRows = rows.filter(r => r.is_image);
   el.innerHTML = rows.map(mt => `
     <div class="gallery-card">
       ${mt.is_image
-        ? `<a href="/api/materials/${mt.id}/file" target="_blank"><img src="/api/materials/${mt.id}/file" alt="${esc(mt.title)}" loading="lazy"></a>`
+        ? `<img src="/api/materials/${mt.id}/file" alt="${esc(mt.title)}" loading="lazy"
+             style="cursor:zoom-in" data-lightbox="${imageRows.findIndex(x => x.id === mt.id)}">`
         : `<a class="gallery-icon" href="/api/materials/${mt.id}/file?dl=1">${icon(mt)}</a>`}
       <div class="gallery-info">
         <b>${esc(mt.title)}</b>
@@ -1146,6 +1148,37 @@ async function loadGallery() {
     try { await api('/api/materials/' + b.dataset.del, { method: 'DELETE' }); toast('נמחק'); loadGallery(); }
     catch (e) { toast(e.message, true); }
   }));
+  el.querySelectorAll('[data-lightbox]').forEach(img => img.addEventListener('click', () =>
+    openLightbox(imageRows, +img.dataset.lightbox)));
+}
+
+function openLightbox(images, idx) {
+  const mt = images[idx];
+  if (!mt) return;
+  const m = modal(`
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h2 style="margin:0">${esc(mt.title)}</h2>
+      <span class="muted">${idx + 1} / ${images.length}</span>
+    </div>
+    ${mt.description ? `<p class="muted" style="margin:4px 0 10px">${esc(mt.description)}</p>` : ''}
+    <div style="text-align:center;background:#f8fafc;border-radius:10px;padding:8px">
+      <img src="/api/materials/${mt.id}/file" alt="${esc(mt.title)}"
+           style="max-width:100%;max-height:65vh;border-radius:6px">
+    </div>
+    <div class="btn-row" style="justify-content:center;margin-top:12px">
+      <button class="btn ghost" id="lbPrev" ${idx === 0 ? 'disabled' : ''}>‹ הקודם</button>
+      <a class="btn" href="/api/materials/${mt.id}/file?dl=1">⬇️ הורד</a>
+      <button class="btn ghost" id="lbNext" ${idx === images.length - 1 ? 'disabled' : ''}>הבא ›</button>
+      <button class="btn ghost" onclick="closeModal()">✕ סגור</button>
+    </div>`, true);
+  m.querySelector('#lbPrev').addEventListener('click', () => { closeModal(); openLightbox(images, idx - 1); });
+  m.querySelector('#lbNext').addEventListener('click', () => { closeModal(); openLightbox(images, idx + 1); });
+  document.onkeydown = (e) => {
+    if (!$('#modalRoot').firstChild) { document.onkeydown = null; return; }
+    if (e.key === 'ArrowRight' && idx > 0) { closeModal(); openLightbox(images, idx - 1); }
+    else if (e.key === 'ArrowLeft' && idx < images.length - 1) { closeModal(); openLightbox(images, idx + 1); }
+    else if (e.key === 'Escape') { closeModal(); document.onkeydown = null; }
+  };
 }
 
 function uploadMaterialModal() {
