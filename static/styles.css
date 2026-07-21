@@ -54,16 +54,6 @@ a { color: var(--brand); }
 @media (max-width: 700px) {
   .topbar { flex-direction: column; }
   .topbar .user-box { position: static; transform: none; }
-  /* יעדי מגע נוחים לאצבע בנייד */
-  main { padding: 14px; }
-  .card { padding: 14px; }
-  .btn { padding: 10px 16px; font-size: 15px; }
-  .btn.sm { padding: 7px 12px; font-size: 14px; }
-  .tabs button { padding: 11px 12px; font-size: 13px; }
-  .filters select, .filters input { padding: 10px; font-size: 14px; min-height: 40px; }
-  .field input, .field select, .field textarea { padding: 11px; font-size: 15px; }
-  table.list th, table.list td { padding: 10px 6px; }
-  .modal { padding: 18px; }
 }
 .login-logo { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; margin-bottom: 12px; }
 .user-box { display: flex; align-items: center; gap: 12px; font-size: 14px; }
@@ -198,3 +188,18 @@ details.doc-raw pre { white-space: pre-wrap; background: #f8fafc; border: 1px so
 .gallery-card img { width: 100%; height: 150px; object-fit: cover; display: block; background: #f8fafc; }
 .gallery-icon { display: flex; align-items: center; justify-content: center; height: 150px; font-size: 54px; background: #f8fafc; text-decoration: none; }
 .gallery-info { padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+
+/* ---- responsive: nier (bottom of file so it overrides base rules) ---- */
+@media (max-width: 700px) {
+  main { padding: 14px; }
+  .card { padding: 14px; }
+  .btn { padding: 10px 16px; font-size: 15px; }
+  .btn.sm { padding: 8px 12px; font-size: 14px; }
+  .tabs button { padding: 12px; font-size: 13px; }
+  .filters select, .filters input { padding: 10px; font-size: 14px; min-height: 42px; }
+  .field input, .field select, .field textarea { padding: 11px; font-size: 16px; }
+  .login-card input, .login-card button { font-size: 16px; }
+  table.list th, table.list td { padding: 11px 6px; }
+  .modal { padding: 18px; }
+  .gallery-grid { grid-template-columns: 1fr 1fr; }
+}
