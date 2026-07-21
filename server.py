@@ -1591,23 +1591,33 @@ AUTO_ANSWER_SCHEMA = {
         'decisive': {'type': 'boolean',
                      'description': 'האם ההנחיות נותנות תשובה חד-משמעית לשאלה'},
         'based_on': {'type': 'string', 'description': 'על איזה סעיף/הנחיה מבוסס המענה'},
+        'settlement_specific': {'type': 'boolean',
+                                'description': 'האם הופעלה הנחיה/החרגה מיוחדת שחלה על היישוב '
+                                'שממנו הגיעה השאלה (ולא רק המדיניות הכללית)'},
     },
-    'required': ['answer', 'decisive', 'based_on'],
+    'required': ['answer', 'decisive', 'based_on', 'settlement_specific'],
     'additionalProperties': False,
 }
 
 DISCLAIMER = '⚠️ המענה אינו חד-משמעי על פי ההנחיות שבתוקף — יש לברר מול תא רשויות מחוז לפני מסירה סופית.'
 
 
-def _auto_answer_system():
+def _auto_answer_system(served_authorities=None, question_authority=None):
+    served = '، '.join(served_authorities) if served_authorities else 'יישובי הנפה'
+    from_auth = question_authority or 'לא זוהתה רשות ספציפית'
     return (
         f'אתה קצין הסברה ב{DISTRICT_NAME} של פיקוד העורף. תפקידך להציע מענה לשאלה מהשטח '
         'אך ורק על בסיס ההנחיות שבתוקף המצורפות. כללים מחייבים:\n'
         '1. ענה רק ממה שכתוב בהנחיות. אל תמציא ואל תסתמך על ידע כללי.\n'
-        '2. אם ההנחיות עונות על השאלה באופן ברור — נסח מענה מלא וסמן decisive=true.\n'
-        '3. אם ההנחיות עונות חלקית, לא עונות, או ניתנות לפרשנות — נסח את מה שכן ידוע '
-        'בזהירות וסמן decisive=false.\n'
-        '4. כתוב בעברית פשוטה וברורה, מתאימה למסירה לפונה. החזר JSON בלבד.'
+        f'2. הנפה נותנת שירות ליישובים הבאים: {served}. השאלה הנוכחית הגיעה מ: {from_auth}.\n'
+        '3. ברירת המחדל היא מענה כללי לפי המדיניות שבתוקף. אולם — אם בהנחיות יש הנחיה או החרגה '
+        f'מיוחדת שחלה ספציפית על היישוב שממנו הגיעה השאלה ({from_auth}), החל אותה, ציין זאת '
+        'מפורשות והדגש במה היא שונה מהכלל, וסמן settlement_specific=true.\n'
+        '4. אם השאלה כללית או שלא זוהתה רשות — תן מענה כללי בלבד וסמן settlement_specific=false. '
+        'אל תמציא החרגה שלא קיימת בהנחיות.\n'
+        '5. אם ההנחיות עונות באופן ברור — נסח מענה מלא וסמן decisive=true; אם עונות חלקית, לא '
+        'עונות או ניתנות לפרשנות — נסח בזהירות וסמן decisive=false.\n'
+        '6. כתוב בעברית פשוטה וברורה, מתאימה למסירה לפונה. החזר JSON בלבד.'
     )
 
 
@@ -1621,8 +1631,11 @@ def auto_answer_question(qid):
     """מציע מענה לשאלה על בסיס ההנחיות בתוקף. מחזיר dict או זורק חריגה.
     לא דורס מענה מוצע קיים."""
     conn = get_db()
-    q = conn.execute('SELECT content, proposed_answer FROM questions WHERE id=?', (qid,)).fetchone()
+    q = conn.execute('SELECT content, proposed_answer, authority FROM questions WHERE id=?',
+                     (qid,)).fetchone()
     directives = get_active_directives(conn)
+    served = [r['name'] for r in conn.execute(
+        'SELECT name FROM authorities WHERE active=1 ORDER BY sort_order, name')]
     conn.close()
     if not q:
         raise LookupError('שאלה לא נמצאה')
@@ -1630,6 +1643,7 @@ def auto_answer_question(qid):
         raise ValueError('אין הנחיות מסומנות "בתוקף" במאגר המסמכים')
     if (q['proposed_answer'] or '').strip():
         raise ValueError('כבר קיים מענה מוצע — מחק אותו תחילה אם ברצונך בהצעה אוטומטית')
+    q_auth = (q['authority'] or '').strip() or None
     # תקציב טקסט שמור — הנחיות ארוכות נחתכות (מגבלות קצב + זמן תגובה של השרת)
     docs_text, budget = [], 15000
     for d in directives:
@@ -1638,26 +1652,29 @@ def auto_answer_question(qid):
             break
         docs_text.append(chunk)
         budget -= len(chunk)
-    raw = call_claude(_auto_answer_system(),
+    raw = call_claude(_auto_answer_system(served, q_auth),
                       'ההנחיות שבתוקף:\n\n' + '\n\n'.join(docs_text) +
-                      f'\n\n---\nהשאלה מהשטח:\n{q["content"][:2000]}',
+                      f'\n\n---\nהשאלה מהשטח (רשות: {q_auth or "לא זוהתה"}):\n{q["content"][:2000]}',
                       max_tokens=2000, schema=AUTO_ANSWER_SCHEMA, effort='low')
     data = json.loads(raw)
     answer = (data.get('answer') or '').strip()
     if not data.get('decisive') and 'תא רשויות מחוז' not in answer:
         answer += '\n\n' + DISCLAIMER
     titles = ', '.join(d['title'] for d in directives[:3])
+    settlement = bool(data.get('settlement_specific'))
     conn = get_db()
     conn.execute('UPDATE questions SET proposed_answer=?, updated_at=? '
                  "WHERE id=? AND (proposed_answer IS NULL OR proposed_answer='')",
                  (answer, now(), qid))
     log_history(conn, qid, 'ai_draft',
                 f'הוצע מענה אוטומטי על בסיס ההנחיות בתוקף ({titles}) — '
-                + ('חד-משמעי' if data.get('decisive') else 'לא חד-משמעי, נוסף סייג'),
+                + ('חד-משמעי' if data.get('decisive') else 'לא חד-משמעי, נוסף סייג')
+                + (f' · הותאם ליישוב {q_auth}' if settlement and q_auth else ''),
                 user_id=None)
     conn.commit()
     conn.close()
-    return {'answer': answer, 'decisive': bool(data.get('decisive')), 'based_on': data.get('based_on')}
+    return {'answer': answer, 'decisive': bool(data.get('decisive')),
+            'based_on': data.get('based_on'), 'settlement_specific': settlement}
 
 
 def _auto_answer_bg(qid):
@@ -2272,7 +2289,8 @@ def list_materials():
     for r in conn.execute(sql, params):
         d = dict(r)
         d['uploaded_by_name'] = user_name(conn, r['uploaded_by_id'])
-        d['is_image'] = (r['mime'] or '').startswith('image/')
+        ext = os.path.splitext(r['orig_name'] or r['stored_name'] or '')[1].lower()
+        d['is_image'] = (r['mime'] or '').startswith('image/') or ext in IMG_MEDIA_TYPES
         rows.append(d)
     conn.close()
     return jsonify(rows)
@@ -2289,6 +2307,8 @@ def upload_material():
     stored = uuid.uuid4().hex + ext
     path = os.path.join(UPLOAD_DIR, stored)
     f.save(path)
+    # mime — מהדפדפן, ואם ריק (למשל העלאה סקריפטית) נסיק מהסיומת כדי שהגלריה תזהה תמונה
+    mime = f.mimetype or IMG_MEDIA_TYPES.get(ext) or (__import__('mimetypes').guess_type(f.filename)[0])
     published = (request.form.get('published_at') or '').strip()
     created = published + 'T00:00:00' if re.fullmatch(r'\d{4}-\d{2}-\d{2}', published) else (published or now())
     title = (request.form.get('title') or '').strip()
@@ -2313,7 +2333,7 @@ def upload_material():
     cur = conn.execute(
         'INSERT INTO materials (title, category, description, orig_name, stored_name, mime, '
         'size, uploaded_by_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-        (title, category, description, f.filename, stored, f.mimetype,
+        (title, category, description, f.filename, stored, mime,
          os.path.getsize(path), session['uid'], created))
     log_action(conn, 'upload_material', 'material', cur.lastrowid, f.filename)
     conn.commit()
