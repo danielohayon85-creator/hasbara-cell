@@ -54,6 +54,16 @@ a { color: var(--brand); }
 @media (max-width: 700px) {
   .topbar { flex-direction: column; }
   .topbar .user-box { position: static; transform: none; }
+  /* יעדי מגע נוחים לאצבע בנייד */
+  main { padding: 14px; }
+  .card { padding: 14px; }
+  .btn { padding: 10px 16px; font-size: 15px; }
+  .btn.sm { padding: 7px 12px; font-size: 14px; }
+  .tabs button { padding: 11px 12px; font-size: 13px; }
+  .filters select, .filters input { padding: 10px; font-size: 14px; min-height: 40px; }
+  .field input, .field select, .field textarea { padding: 11px; font-size: 15px; }
+  table.list th, table.list td { padding: 10px 6px; }
+  .modal { padding: 18px; }
 }
 .login-logo { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; margin-bottom: 12px; }
 .user-box { display: flex; align-items: center; gap: 12px; font-size: 14px; }
