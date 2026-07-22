@@ -99,6 +99,7 @@ async function enterApp() {
   $('#loginView').classList.add('hidden');
   $('#appView').classList.remove('hidden');
   $('#userName').textContent = `${ME.name}`;
+  renderShiftBox();
   renderTabs();
   switchTab('dashboard');
   // חיווי שאלות חדשות — בדיקה כל חצי דקה + בקשת הרשאה להתראות דפדפן
@@ -136,6 +137,42 @@ $('#pwBtn').addEventListener('click', () => {
     } catch (e) { toast(e.message, true); }
   });
 });
+
+/* ---------------- משמרת ---------------- */
+function renderShiftBox() {
+  const box = $('#shiftBox');
+  if (!box) return;
+  const sh = META.shift;
+  const mine = sh && sh.user_id === ME.id;
+  box.innerHTML = sh
+    ? `<span class="shift-chip ${mine ? 'mine' : ''}">🕐 במשמרת: ${esc(sh.name)}</span>
+       ${!mine && canWrite() ? '<button class="link" id="takeShiftBtn">קח משמרת</button>' : ''}
+       ${mine ? '<button class="link" id="endShiftBtn">סיים משמרת</button>' : ''}`
+    : (canWrite() ? '<button class="btn sm amber" id="takeShiftBtn">🕐 אני במשמרת</button>'
+                  : '<span class="shift-chip">🕐 אין איש במשמרת</span>');
+  const take = $('#takeShiftBtn');
+  if (take) take.addEventListener('click', async () => {
+    if (META.shift && !confirm(`לקחת את המשמרת מ${META.shift.name}?`)) return;
+    try {
+      await api('/api/shift/take', { method: 'POST', body: {} });
+      META = await api('/api/meta');
+      renderShiftBox();
+      toast('🕐 נרשמת כמי שבמשמרת — התראות על שאלות חדשות יגיעו אליך' + (META.wa_send_enabled ? '' : ''));
+      if (currentTab === 'dashboard') renderDashboard();
+    } catch (e) { toast(e.message, true); }
+  });
+  const end = $('#endShiftBtn');
+  if (end) end.addEventListener('click', async () => {
+    if (!confirm('לסיים משמרת? מומלץ להפיק סיכום משמרת לפני.')) return;
+    try {
+      await api('/api/shift/release', { method: 'POST', body: {} });
+      META = await api('/api/meta');
+      renderShiftBox();
+      toast('המשמרת שוחררה — אל תשכח סיכום משמרת');
+      switchTab('summary');
+    } catch (e) { toast(e.message, true); }
+  });
+}
 
 /* ---------------- טאבים ---------------- */
 const TABS = [
@@ -224,9 +261,9 @@ async function renderDashboard() {
       <div class="stat-card red" data-go="questions"><div class="num">${d.open}</div><div class="lbl">שאלות פתוחות</div></div>
       <div class="stat-card amber" data-go="questions"><div class="num">${d.in_progress}</div><div class="lbl">בטיפול</div></div>
       <div class="stat-card amber" data-go="questions"><div class="num">${d.awaiting_approval}</div><div class="lbl">ממתינות לאישור</div></div>
-      <div class="stat-card green" data-go="questions"><div class="num">${d.closed_today}</div><div class="lbl">נסגרו היום</div></div>
-      <div class="stat-card" data-go="activities"><div class="num">${d.activities_today}</div><div class="lbl">פעולות היום</div></div>
-      <div class="stat-card" data-go="activities"><div class="num">${d.distributed_today}</div><div class="lbl">הודעות הופצו היום</div></div>
+      <div class="stat-card green" data-go="questions"><div class="num">${d.closed_today}</div><div class="lbl">נסגרו במשמרת</div></div>
+      <div class="stat-card" data-go="activities"><div class="num">${d.activities_today}</div><div class="lbl">פעולות במשמרת</div></div>
+      <div class="stat-card" data-go="activities"><div class="num">${d.distributed_today}</div><div class="lbl">הופצו במשמרת</div></div>
     </div>
     <div class="card">
       <h2>הפקת תוצרים בלחיצה</h2>
@@ -1771,6 +1808,8 @@ function userForm(u = null) {
     <div class="field"><label>תפקיד</label><select id="uRole">
       ${Object.entries(ROLE_LABELS).map(([k, v]) => `<option value="${k}" ${u && u.role === k ? 'selected' : ''}>${v}</option>`).join('')}
     </select></div>
+    <div class="field"><label>טלפון (להתראות וואטסאפ כשבמשמרת)</label>
+      <input id="uPhone" dir="ltr" value="${esc(u ? u.phone || '' : '')}" placeholder="05X-XXXXXXX"></div>
     <div class="field"><label>${isEdit ? 'סיסמה חדשה (ריק = ללא שינוי)' : 'סיסמה (לפחות 8 תווים)'}</label>
       <input type="password" id="uPass"></div>
     ${isEdit ? `<div class="field"><label><input type="checkbox" id="uActive" ${u.active ? 'checked' : ''}> פעיל</label></div>` : ''}
@@ -1779,7 +1818,7 @@ function userForm(u = null) {
   m.querySelector('#uSave').addEventListener('click', async () => {
     try {
       if (isEdit) {
-        const body = { name: m.querySelector('#uName').value.trim(), role: m.querySelector('#uRole').value, active: m.querySelector('#uActive').checked ? 1 : 0 };
+        const body = { name: m.querySelector('#uName').value.trim(), role: m.querySelector('#uRole').value, active: m.querySelector('#uActive').checked ? 1 : 0, phone: m.querySelector('#uPhone').value.trim() };
         const p = m.querySelector('#uPass').value;
         if (p) body.password = p;
         await api('/api/users/' + u.id, { method: 'PUT', body });
@@ -1788,6 +1827,7 @@ function userForm(u = null) {
           name: m.querySelector('#uName').value.trim(),
           username: m.querySelector('#uUsername').value.trim(),
           role: m.querySelector('#uRole').value,
+          phone: m.querySelector('#uPhone').value.trim(),
           password: m.querySelector('#uPass').value,
         } });
       }

@@ -56,7 +56,9 @@ a { color: var(--brand); }
   .topbar .user-box { position: static; transform: none; }
 }
 .login-logo { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; margin-bottom: 12px; }
-.user-box { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.user-box { display: flex; align-items: center; gap: 12px; font-size: 14px; flex-wrap: wrap; }
+.shift-chip { background: rgba(255,255,255,.12); border-radius: 14px; padding: 4px 12px; font-size: 13px; }
+.shift-chip.mine { background: #16a34a; font-weight: 600; }
 .link { background: none; border: none; color: #cbd5e1; text-decoration: underline; }
 
 /* ---- tabs ---- */

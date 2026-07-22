@@ -175,6 +175,16 @@ def today():
     return now_dt().date().isoformat()
 
 
+def shift_start(dt=None):
+    """תחילת המשמרת הנוכחית — משמרות של 12 שעות: 08:00-20:00 ו-20:00-08:00."""
+    dt = dt or now_dt()
+    if dt.hour >= 20:
+        return dt.replace(hour=20, minute=0, second=0, microsecond=0)
+    if dt.hour >= 8:
+        return dt.replace(hour=8, minute=0, second=0, microsecond=0)
+    return (dt - timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+
+
 # ---------------------------------------------------------------- DB
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -403,6 +413,7 @@ def init_db():
             c.execute(f'ALTER TABLE {table} ADD COLUMN {ddl}')
     add_col('documents', 'is_active_directive',
             'is_active_directive INTEGER NOT NULL DEFAULT 0')
+    add_col('users', 'phone', 'phone TEXT')
 
     if c.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 0:
         admin_pw = os.environ.get('ADMIN_PASSWORD') or ''.join(
@@ -602,6 +613,44 @@ def change_password():
     return jsonify({'ok': True})
 
 
+# ---------------------------------------------------------------- משמרת
+def current_shift(conn):
+    """מחזיר את מצב המשמרת: מי מחזיק אותה כרגע (אם לקח אותה במהלך המשמרת הנוכחית)."""
+    uid = get_setting(conn, 'shift_user_id')
+    started = get_setting(conn, 'shift_taken_at')
+    if not uid or not started:
+        return None
+    # אם המקל נלקח לפני תחילת המשמרת הנוכחית — הוא כבר לא רלוונטי
+    if started < shift_start().isoformat(timespec='seconds'):
+        return None
+    return {'user_id': int(uid), 'name': user_name(conn, int(uid)), 'taken_at': started}
+
+
+@app.route('/api/shift/take', methods=['POST'])
+def take_shift():
+    """המשתמש הנוכחי לוקח את המשמרת. מוצג לכולם בסרגל העליון."""
+    conn = get_db()
+    prev = current_shift(conn)
+    set_setting(conn, 'shift_user_id', str(session['uid']))
+    set_setting(conn, 'shift_taken_at', now())
+    log_action(conn, 'take_shift', 'shift', None,
+               f'{session["name"]} נכנס/ה למשמרת' + (f' (החליף/ה את {prev["name"]})' if prev else ''))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'name': session['name']})
+
+
+@app.route('/api/shift/release', methods=['POST'])
+def release_shift():
+    """שחרור המשמרת (בסיום, אחרי הפקת סיכום)."""
+    conn = get_db()
+    conn.execute("DELETE FROM settings WHERE key IN ('shift_user_id','shift_taken_at')")
+    log_action(conn, 'release_shift', 'shift', None, f'{session["name"]} סיים/ה משמרת')
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
 # ---------------------------------------------------------------- meta
 @app.route('/api/meta')
 def meta():
@@ -612,6 +661,7 @@ def meta():
         'SELECT name FROM authorities WHERE active=1 ORDER BY sort_order, name')]
     users = [dict(r) for r in conn.execute(
         'SELECT id, name, role FROM users WHERE active=1 ORDER BY name')]
+    shift = current_shift(conn)
     conn.close()
     return jsonify({
         'topics': topics, 'authorities': authorities, 'users': users,
@@ -622,6 +672,8 @@ def meta():
         'canned_categories': CANNED_CATEGORIES, 'material_categories': MATERIAL_CATEGORIES,
         'ai_enabled': ai_enabled(),
         'wa_send_enabled': wa_send_enabled(),
+        'shift': shift,
+        'shift_start': shift_start().isoformat(timespec='seconds'),
     })
 
 
@@ -1111,12 +1163,19 @@ def send_whatsapp(phone, text):
 
 
 def alert_new_question(qid, content, sender_desc):
-    """שולח התראת וואטסאפ על שאלה חדשה למספרי ההתראות שהוגדרו. כשל בהתראה לא מפיל את הקליטה."""
+    """שולח התראת וואטסאפ על שאלה חדשה: למי שבמשמרת (אם הגדיר טלפון) + למספרי ההתראות הקבועים."""
     conn = get_db()
     numbers = (get_setting(conn, 'alert_numbers') or '').replace(' ', '')
+    # מי שבמשמרת מקבל תמיד, גם אם אינו ברשימה הקבועה
+    shift = current_shift(conn)
+    if shift:
+        row = conn.execute('SELECT phone FROM users WHERE id=?', (shift['user_id'],)).fetchone()
+        if row and (row['phone'] or '').strip():
+            numbers = (numbers + ',' if numbers else '') + row['phone'].strip()
     conn.close()
     if not numbers or not wa_send_enabled():
         return
+    numbers = ','.join(dict.fromkeys(n for n in numbers.split(',') if n.strip()))  # ייחוד
     msg = (f'🔔 שאלה חדשה בתא ההסברה (#{qid})\n'
            f'מאת: {sender_desc}\n'
            f'━━━━━━━━━━\n{content[:300]}\n━━━━━━━━━━\n'
@@ -2469,8 +2528,11 @@ def preview_summary():
     conn = get_db()
     start = request.args.get('from')
     if not start:
+        # ברירת מחדל: תחילת המשמרת הנוכחית (8:00/20:00); אם כבר נשמר סיכום בתוך
+        # המשמרת — ממשיכים ממנו כדי לא לחפוף
+        cur_shift_start = shift_start().isoformat(timespec='seconds')
         last = conn.execute('SELECT MAX(period_end) me FROM shift_summaries').fetchone()
-        start = last['me'] or (today() + 'T00:00:00')
+        start = max(cur_shift_start, last['me']) if last['me'] else cur_shift_start
     end = request.args.get('to') or now()
     stats = gather_stats(conn, start, end)
     conn.close()
@@ -2523,7 +2585,7 @@ def save_summary():
 @app.route('/api/dashboard')
 def dashboard():
     conn = get_db()
-    t0 = today() + 'T00:00:00'
+    t0 = shift_start().isoformat(timespec='seconds')   # מוני "המשמרת הנוכחית" (8:00/20:00)
     d = {}
     d['open'] = conn.execute("SELECT COUNT(*) c FROM questions WHERE status IN ('חדש','דורש המשך טיפול')").fetchone()['c']
     d['in_progress'] = conn.execute("SELECT COUNT(*) c FROM questions WHERE status IN ('בטיפול','ממתין למידע')").fetchone()['c']
@@ -2677,7 +2739,7 @@ def search():
 def list_users():
     conn = get_db()
     rows = [dict(r) for r in conn.execute(
-        'SELECT id, name, username, role, active, created_at FROM users ORDER BY id')]
+        'SELECT id, name, username, role, phone, active, created_at FROM users ORDER BY id')]
     conn.close()
     return jsonify(rows)
 
@@ -2694,10 +2756,11 @@ def create_user():
         return jsonify({'error': 'סיסמה חייבת לפחות 8 תווים'}), 400
     conn = get_db()
     try:
-        cur = conn.execute('INSERT INTO users (name, username, password_hash, role, active, created_at) '
-                           'VALUES (?,?,?,?,1,?)',
+        cur = conn.execute('INSERT INTO users (name, username, password_hash, role, phone, active, created_at) '
+                           'VALUES (?,?,?,?,?,1,?)',
                            (d['name'].strip(), d['username'].strip(),
-                            generate_password_hash(d['password']), d['role'], now()))
+                            generate_password_hash(d['password']), d['role'],
+                            normalize_phone((d.get('phone') or '').strip()) or None, now()))
     except sqlite3.IntegrityError:
         conn.close()
         return jsonify({'error': 'שם המשתמש כבר קיים'}), 400
@@ -2730,6 +2793,9 @@ def update_user(uid):
                 return jsonify({'error': 'תפקיד לא חוקי'}), 400
             sets.append(f'{f}=?')
             params.append(d[f])
+    if 'phone' in d:
+        sets.append('phone=?')
+        params.append(normalize_phone((d['phone'] or '').strip()) or None)
     if d.get('password'):
         if len(d['password']) < 8:
             conn.close()
