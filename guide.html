@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מדריך למשתמש — תא הסברה נפת הרטוב</title>
+<link rel="icon" type="image/png" href="static/logo.png">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', 'Assistant', sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; line-height: 1.75; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 18px 60px; }
+  header.hero { background: #0f172a; color: #fff; padding: 28px 18px; text-align: center; }
+  header.hero img { width: 84px; height: 84px; border-radius: 50%; background: #fff; }
+  header.hero h1 { margin: 10px 0 4px; font-size: 26px; }
+  header.hero p { margin: 0; color: #cbd5e1; }
+  h2 { color: #134e4a; border-bottom: 3px solid #0f766e; padding-bottom: 6px; margin-top: 38px; font-size: 21px; }
+  h3 { color: #0f766e; margin: 22px 0 6px; font-size: 17px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; margin: 14px 0; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { border: 1px solid #e2e8f0; padding: 9px 10px; text-align: right; font-size: 14px; }
+  th { background: #f0fdfa; color: #134e4a; }
+  ol li, ul li { margin-bottom: 6px; }
+  .tip { background: #f0fdfa; border-inline-start: 4px solid #0f766e; border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
+  .warn { background: #fffbeb; border-inline-start: 4px solid #d97706; border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
+  code, .kbd { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; padding: 1px 7px; font-family: inherit; font-size: 13px; }
+  .btn-demo { display: inline-block; background: #0f766e; color: #fff; border-radius: 8px; padding: 2px 10px; font-size: 13px; }
+  .btn-demo.green { background: #25D366; }
+  .btn-demo.amber { background: #d97706; }
+  a { color: #0f766e; }
+  .toc { columns: 2; font-size: 14px; }
+  .toc a { text-decoration: none; }
+  @media (max-width: 600px) { .toc { columns: 1; } }
+  @media print {
+    header.hero { background: #fff; color: #000; }
+    .noprint { display: none; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <img src="static/logo.png" alt="לוגו" onerror="this.style.display='none'">
+  <h1>מדריך למשתמש</h1>
+  <p>מערכת ניהול תא הסברה — נפת הרטוב · hasbara-cell.onrender.com</p>
+</header>
+<div class="wrap">
+
+<div class="card noprint">
+  <b>ניווט מהיר:</b>
+  <div class="toc">
+    <div><a href="#start">🚪 כניסה ראשונה</a></div>
+    <div><a href="#tabs">🗺 המסכים בקצרה</a></div>
+    <div><a href="#shift">🕐 משמרת</a></div>
+    <div><a href="#incoming">📱 שאלה שנכנסת מוואטסאפ</a></div>
+    <div><a href="#handle">✍️ טיפול בשאלה ומענה</a></div>
+    <div><a href="#manual">📞 שאלה שהגיעה בטלפון</a></div>
+    <div><a href="#directive">📌 הנחיה חדשה הגיעה</a></div>
+    <div><a href="#broadcast">📣 הפצת הודעה</a></div>
+    <div><a href="#summary">🕐 סיכום משמרת</a></div>
+    <div><a href="#search">🔍 חיפוש</a></div>
+    <div><a href="#roles">🔐 מי יכול מה</a></div>
+    <div><a href="#admin">⚙️ למנהל המערכת</a></div>
+    <div><a href="#faq">❓ תקלות נפוצות</a></div>
+  </div>
+</div>
+
+<h2 id="start">🚪 כניסה ראשונה</h2>
+<div class="card">
+<ol>
+  <li>גלוש אל <b>hasbara-cell.onrender.com</b> (מחשב או טלפון).</li>
+  <li>הזן את שם המשתמש והסיסמה שקיבלת מהמנהל.</li>
+  <li>מיד אחרי הכניסה הראשונה — לחץ למעלה על <span class="btn-demo">שינוי סיסמה</span> וקבע סיסמה אישית (8 תווים לפחות).</li>
+  <li>בטלפון מומלץ: תפריט הדפדפן ← <b>"הוסף למסך הבית"</b> — המערכת תיפתח כמו אפליקציה.</li>
+  <li>כשהדפדפן יבקש הרשאה להתראות — אשר, כדי לקבל חיווי על שאלות חדשות.</li>
+</ol>
+<div class="warn">אחרי 10 ניסיונות כניסה שגויים המערכת נחסמת ל-5 דקות. שים לב לשפת המקלדת (עברית/אנגלית)!</div>
+</div>
+
+<h2 id="tabs">🗺 המסכים בקצרה</h2>
+<table>
+<tr><th>מסך</th><th>מה עושים בו</th></tr>
+<tr><td>📊 דשבורד</td><td>תמונת מצב: כמה שאלות פתוחות/בטיפול/ממתינות, שאלות דחופות, והפקת דוחות בלחיצה</td></tr>
+<tr><td>❓ מרכז שאלות</td><td>כל השאלות מהשטח — סיווג, מענה, אישור ושליחה חזרה</td></tr>
+<tr><td>📄 מסמכים</td><td>הנחיות ומסמכים + תובנות AI (תקציר, מסרים, שו"ת, פערים)</td></tr>
+<tr><td>📢 מסרים</td><td>המסרים המאושרים והעדכניים של התא</td></tr>
+<tr><td>🗂 בנק הודעות</td><td>הודעות מוכנות מראש לתרחישי חירום — ממלאים [שדות] ומפיצים</td></tr>
+<tr><td>🖼 גלריה</td><td>אינפוגרפיקות וחומרי הסברה להורדה — לחיצה על תמונה פותחת תצוגה מלאה</td></tr>
+<tr><td>👥 אנשי קשר</td><td>גורמי השטח לפי רשות + רשימת התפוצה</td></tr>
+<tr><td>📝 פעילות</td><td>תיעוד כל פעולה שבוצעה: תדרוכים, עדכונים, הפצות</td></tr>
+<tr><td>📤 הפצה</td><td>יצירת הודעות (עם AI), אישורן ושליחתן לרשימת התפוצה</td></tr>
+<tr><td>🕐 סיכום משמרת</td><td>הפקת סיכום בלחיצה — מה קרה, מה פתוח, מה דחוף</td></tr>
+<tr><td>🔍 חיפוש</td><td>איתור כל שאלה, מענה, מסמך או מסר שאי-פעם נכנסו</td></tr>
+<tr><td>⚙️ הגדרות</td><td>ניהול משתמשים, חיבורים וגיבוי (למנהל/מש"ק)</td></tr>
+</table>
+
+<h2 id="shift">🕐 משמרת (8:00–20:00 / 20:00–8:00)</h2>
+<div class="card">
+<ol>
+  <li>בתחילת המשמרת לחץ בסרגל העליון על <span class="btn-demo amber">🕐 אני במשמרת</span> — כולם יראו שאתה מחזיק את המקל.</li>
+  <li>מרגע זה התראות הוואטסאפ על שאלות חדשות מנותבות אליך (אם הטלפון שלך מוגדר אצל המנהל).</li>
+  <li>בסיום: הפק <a href="#summary">סיכום משמרת</a> ← לחץ <b>שחרר משמרת</b> (או שהמחליף לוחץ "אני במשמרת" ולוקח).</li>
+</ol>
+</div>
+
+<h2 id="incoming">📱 שאלה שנכנסת לבד מוואטסאפ — מה קורה אוטומטית</h2>
+<div class="card">
+<p>כשגורם שטח שולח הודעה למספר הייעודי או שואל בקבוצה שהבוט חבר בה:</p>
+<ol>
+  <li>ההודעה נבחנת — בקבוצה, רק שאלות רלוונטיות לתא נקלטות (שיחת חולין מסוננת).</li>
+  <li>נפתחת שאלה במרכז השאלות עם שם השואל, הטלפון והרשות שלו (מספר אנשי הקשר).</li>
+  <li>אם יש <b>הנחיות בתוקף</b> — ה-AI מציע טיוטת מענה על בסיסן, כולל התאמה ליישוב של השואל אם יש לו החרגה.</li>
+  <li>נשלחת התראת וואטסאפ למי שבמשמרת, ובמערכת קופץ חיווי + מונה אדום על הטאב.</li>
+  <li>גם <b>מסמכים</b> שנשלחים בוואטסאפ (PDF/Word) נקלטים אוטומטית למאגר עם תובנות, ותמונות בפרטי נפתחות כשאלה עם צרופה.</li>
+</ol>
+<div class="tip">שום דבר לא נשלח לפונה אוטומטית — תמיד בן אדם מאשר לפני שליחה.</div>
+</div>
+
+<h2 id="handle">✍️ טיפול בשאלה — מהכניסה ועד המענה</h2>
+<div class="card">
+<ol>
+  <li>פתח את השאלה במרכז השאלות (לחיצה על השורה).</li>
+  <li>ודא סיווג: נושא, דחיפות, רשות, גורם מטפל. שמור.</li>
+  <li><b>מענה:</b> אם ה-AI כבר הציע — קרא, תקן וערוך. אם לא — כתוב בעצמך, או לחץ <span class="btn-demo">🤖 הצע מענה מההנחיות שבתוקף</span>.</li>
+  <li>אם המענה מסומן "נדרש אישור" — לחץ <b>שלח לאישור</b>; מש"ק/מנהל יאשר.</li>
+  <li>אחרי אישור: <span class="btn-demo green">📱 השב בוואטסאפ לפונה</span> — המענה נשלח ישירות לטלפון של השואל, או <b>📋 העתק</b> לשליחה ידנית.</li>
+  <li>השאלה עוברת ל"נענה" ונשמרת לחיפוש עתידי. סגור אותה כשהטיפול הסתיים.</li>
+</ol>
+<div class="warn">שים לב לסייג במענים לא חד-משמעיים: <i>"יש לברר מול תא רשויות מחוז"</i> — אל תסיר אותו בלי בירור אמיתי.</div>
+</div>
+
+<h2 id="manual">📞 שאלה שהגיעה בטלפון / במייל / פרונטלית</h2>
+<div class="card">
+<ul>
+  <li><b>+ שאלה חדשה</b> — מלא את הפרטים ידנית (רק תוכן השאלה חובה).</li>
+  <li><b>📱 הדבק מוואטסאפ</b> — העתק הודעה שלמה מוואטסאפ והדבק; המערכת מזהה לבד שם, טלפון ותוכן.</li>
+</ul>
+</div>
+
+<h2 id="directive">📌 הגיעה הנחיה/מדיניות חדשה — עדכון "ההנחיות בתוקף"</h2>
+<div class="card">
+<ol>
+  <li>העלה את המסמך במסך 📄 מסמכים (או פשוט שלח אותו לבוט בוואטסאפ — ייקלט לבד).</li>
+  <li>פתח את המסמך ← <span class="btn-demo">🤖 הפק תובנות</span> — תקציר, מסרים, שו"ת ופערים נוצרים אוטומטית.</li>
+  <li>לחץ <span class="btn-demo amber">📌 סמן כהנחיה בתוקף</span> — מרגע זה כל שאלה נכנסת נבחנת מולה.</li>
+  <li><b>חשוב:</b> הסר את הסימון מההנחיה הישנה (📌 הסר מ"הנחיות בתוקף") — שלא יהיו שתי גרסאות פעילות.</li>
+</ol>
+<div class="tip">מסמכים ישנים נשארים במאגר כידע ארגוני וניתנים לחיפוש — רק הסימון 📌 קובע מה "חי".</div>
+</div>
+
+<h2 id="broadcast">📣 הפצת הודעה לשטח</h2>
+<div class="card">
+<h3>בחירום — מהבנק (הכי מהיר)</h3>
+<ol>
+  <li>🗂 בנק הודעות ← בחר תבנית לפי התרחיש ← <b>🪄 מחולל</b> ממלא את ה[שדות] עם תצוגה מקדימה.</li>
+  <li>שלח להפצה ← אישור מש"ק/מנהל אם נדרש ← <span class="btn-demo green">📣 שלח לרשימת התפוצה</span> — נשלח בוואטסאפ לכל המסומנים 📣 בספר אנשי הקשר.</li>
+</ol>
+<h3>הודעה חדשה מתוכן קיים</h3>
+<ol>
+  <li>📤 הפצה ← בחר מקור (שאלה/מסמך/מסר/ידני) וקהל יעד ← <span class="btn-demo">🤖 נסח הודעה</span> — ה-AI מתאים את השפה לקהל. אפשר לנסח מחדש כמה שרוצים.</li>
+  <li>ערוך ← שמור ← אשר ← הפץ. כל הפצה נרשמת אוטומטית בטאב 📝 פעילות.</li>
+</ol>
+</div>
+
+<h2 id="summary">🕐 סיכום משמרת / העברת מקל</h2>
+<div class="card">
+<ol>
+  <li>מסך 🕐 סיכום משמרת ← <b>📋 הפק סיכום משמרת</b> — המערכת אוספת לבד את כל מה שקרה מאז הסיכום הקודם.</li>
+  <li>רוצה נוסח קריא? <span class="btn-demo">🤖 נסח נרטיבי עם AI</span> — סיכום מסודר: מה קרה, מה הופץ, מה פתוח, מה דחוף.</li>
+  <li>ערוך אם צריך ← <b>💾 שמור</b> ← אפשר גם 📋 להעתיק לוואטסאפ של המחליף או ⬇️ להוריד.</li>
+</ol>
+</div>
+
+<h2 id="search">🔍 חיפוש — "כבר ענינו על זה פעם?"</h2>
+<div class="card">
+<p>מסך 🔍 חיפוש מחפש בכל דבר שאי-פעם נכנס למערכת: שאלות ומענים, מסמכים ותובנות, מסרים, תבניות, פעילות, סיכומים וחומרי גלריה. מצאת מענה קודם? העתק אותו לשאלה החדשה — אין צורך להמציא מחדש.</p>
+</div>
+
+<h2 id="roles">🔐 מי יכול מה</h2>
+<table>
+<tr><th></th><th>מנהל מערכת</th><th>מש"ק הסברה</th><th>משתמש רגיל</th><th>צפייה בלבד</th></tr>
+<tr><td>צפייה בכל המידע</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>פתיחת שאלות, מענים, העלאות, תיעוד</td><td>✅</td><td>✅</td><td>✅</td><td>—</td></tr>
+<tr><td>אישור מענים, מסרים והודעות</td><td>✅</td><td>✅</td><td>—</td><td>—</td></tr>
+<tr><td>סימון הנחיות בתוקף, מחיקות</td><td>✅</td><td>✅</td><td>—</td><td>—</td></tr>
+<tr><td>ניהול משתמשים, חיבורים וגיבוי</td><td>✅</td><td>—</td><td>—</td><td>—</td></tr>
+</table>
+
+<h2 id="admin">⚙️ למנהל המערכת</h2>
+<div class="card">
+<ul>
+  <li><b>משתמשים:</b> הגדרות ← משתמשים והרשאות ← הוספה/עריכה/השבתה. <b>🔑 הגרל וייצא סיסמאות</b> — מאפס לכולם ומציג רשימה פעם אחת לחלוקה.</li>
+  <li><b>אנשי קשר ורשימת תפוצה:</b> 👥 אנשי קשר — עדכן טלפונים, סמן 📣 למי שברשימת התפוצה. שולח חדש בוואטסאפ נוסף לספר אוטומטית.</li>
+  <li><b>התראות:</b> הגדרות ← "מספרי וואטסאפ להתראה" — מי מקבל הודעה על כל שאלה נכנסת.</li>
+  <li><b>מפתח AI:</b> הגדרות ← מפתח Anthropic — מפעיל את כל יכולות ה-AI. בלי מפתח המערכת עובדת רגיל, ידני.</li>
+  <li><b>חיבור וואטסאפ:</b> הגדרות ← פרטי Green API (לשליחה) + כתובת ה-webhook (לקליטה, מודבקת בקונסול Green API).</li>
+  <li><b>📡 יומן וואטסאפ:</b> כל הודעה שהגיעה לשרת — מה נקלט, מה סונן ולמה. הכלי הראשון לבדיקה כשמשהו "לא מגיע".</li>
+  <li><b>📦 גיבוי:</b> הגדרות ← הורד גיבוי מלא (ZIP עם כל הנתונים והקבצים). מומלץ אחת לשבוע, לשמור בדרייב.</li>
+</ul>
+</div>
+
+<h2 id="faq">❓ תקלות נפוצות</h2>
+<div class="card">
+<ul>
+  <li><b>"שם משתמש או סיסמה שגויים"</b> — בדוק שפת מקלדת. אחרי 10 כשלונות יש נעילה של 5 דקות.</li>
+  <li><b>הודעה בקבוצה לא נקלטה</b> — ייתכן שסוננה כלא-רלוונטית (בכוונה). המנהל יכול לבדוק ביומן הוואטסאפ בהגדרות. תמיד אפשר "הדבק מוואטסאפ".</li>
+  <li><b>כפתורי ה-AI לא מופיעים</b> — לא מוגדר מפתח AI (המנהל מגדיר בהגדרות). הכל עובד גם ידנית.</li>
+  <li><b>PDF עלה בלי טקסט</b> — כנראה סריקה. פתח את המסמך ← עריכה ← הדבק את הטקסט ידנית ← ג'נרט תובנות.</li>
+  <li><b>קובץ לא עולה</b> — הגודל המרבי 20MB; סוגי קבצים: תמונות, PDF, Word, Excel, PowerPoint, MP4.</li>
+  <li><b>שגיאת שרת</b> — נרשמת אוטומטית ביומן; ספרו למנהל מה עשיתם ומתי.</li>
+</ul>
+</div>
+
+<p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:40px" class="noprint">
+  תא הסברה נפת הרטוב · לשאלות על המערכת פנו למנהל · <a href="/">חזרה למערכת</a> · להדפסה: Ctrl+P
+</p>
+</div>
+</body>
+</html>

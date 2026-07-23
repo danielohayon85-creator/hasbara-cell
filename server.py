@@ -3076,6 +3076,12 @@ def index():
     return send_from_directory(BASE_DIR, 'index.html')
 
 
+@app.route('/guide')
+def guide():
+    """מדריך למשתמש — דף סטטי, זמין גם בלי התחברות (אין בו מידע רגיש)."""
+    return send_from_directory(BASE_DIR, 'guide.html')
+
+
 # אין catch-all סטטי בכוונה — רק index.html ו-/static מוגשים (לא חושפים קוד מקור)
 
 init_db()
